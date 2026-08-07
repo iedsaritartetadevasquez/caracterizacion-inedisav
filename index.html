@@ -316,7 +316,7 @@ const asistenciaStorage = {
     if(!db) return;
     await db.collection(ASISTENCIA_COLLECTION).doc(idAsistencia(grado,grupo,fecha)).set({
       grado,grupo:grupo||"",fecha,
-      [`registros.${estudianteId}`]:estado,
+      registros:{[estudianteId]:estado},
       actualizadoPor:usuario||"",actualizadoEn:new Date().toISOString()
     },{merge:true});
   }
@@ -340,7 +340,7 @@ const notasStorage = {
     if(!db) return;
     await db.collection(NOTAS_COLLECTION).doc(idNotas(grado,grupo,periodo)).set({
       grado,grupo:grupo||"",periodo,
-      [`notas.${estudianteId}.${categoria}.n${indiceN}`]:valor,
+      notas:{[estudianteId]:{[categoria]:{["n"+indiceN]:valor}}},
       actualizadoPor:usuario||"",actualizadoEn:new Date().toISOString()
     },{merge:true});
   }
@@ -1550,7 +1550,7 @@ function NotasDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMarcar})
   return h('div',{className:"space-y-3"},
     h('div',{className:"flex flex-wrap items-center gap-3"},
       h('label',{className:"text-xs font-medium text-slate-500"},"Período:"),
-      h('select',{value:periodo,onChange:e=>setPeriodo(e.target.value),className:"border border-slate-200 rounded-lg px-3 py-1.5 text-sm"},["1","2","3","4"].map(p=>h('option',{key:p,value:p},"Período "+p))),
+      h('select',{value:periodo,onChange:e=>setPeriodo(e.target.value),className:"border border-slate-200 rounded-lg px-3 py-1.5 text-sm"},["1","2","3"].map(p=>h('option',{key:p,value:p},"Período "+p))),
       !puedeMarcar&&h('span',{className:"text-xs text-amber-600"},"⚠️ Solo lectura (tu rol no puede editar notas)")
     ),
     loading
