@@ -299,6 +299,54 @@ const personalStorage = {
 };
 
 // ═══════════════════════════════════════════
+// ASISTENCIA DIGITAL (1 documento por grado+grupo+fecha, con el estado de todos los estudiantes ese día)
+// ═══════════════════════════════════════════
+const ASISTENCIA_COLLECTION = 'inedisav_asistencia';
+const ESTADO_ASISTENCIA_OPTS=[{value:"P",label:"Presente",color:"bg-emerald-100 text-emerald-700"},{value:"A",label:"Ausente",color:"bg-rose-100 text-rose-700"},{value:"T",label:"Tarde",color:"bg-amber-100 text-amber-700"},{value:"E",label:"Excusa",color:"bg-blue-100 text-blue-700"}];
+function idAsistencia(grado,grupo,fecha){ return `${grado}_${grupo||"unico"}_${fecha}`; }
+const asistenciaStorage = {
+  subscribe(grado,grupo,fecha,onData,onError){
+    if(!db){ onData(null); return ()=>{}; }
+    return db.collection(ASISTENCIA_COLLECTION).doc(idAsistencia(grado,grupo,fecha)).onSnapshot(
+      snap => onData(snap.exists ? snap.data() : {registros:{}}),
+      err => { console.error('Error leyendo asistencia:', err); onError && onError(err); }
+    );
+  },
+  async marcar(grado,grupo,fecha,estudianteId,estado,usuario){
+    if(!db) return;
+    await db.collection(ASISTENCIA_COLLECTION).doc(idAsistencia(grado,grupo,fecha)).set({
+      grado,grupo:grupo||"",fecha,
+      [`registros.${estudianteId}`]:estado,
+      actualizadoPor:usuario||"",actualizadoEn:new Date().toISOString()
+    },{merge:true});
+  }
+};
+
+// ═══════════════════════════════════════════
+// NOTAS DIGITALES (1 documento por grado+grupo+período, con las notas de todos los estudiantes)
+// ═══════════════════════════════════════════
+const NOTAS_COLLECTION = 'inedisav_notas';
+const CATEGORIAS_NOTA=[{id:"saber",label:"Saber"},{id:"saberHacer",label:"Saber Hacer"},{id:"ser",label:"Ser"}];
+function idNotas(grado,grupo,periodo){ return `${grado}_${grupo||"unico"}_P${periodo}`; }
+const notasStorage = {
+  subscribe(grado,grupo,periodo,onData,onError){
+    if(!db){ onData(null); return ()=>{}; }
+    return db.collection(NOTAS_COLLECTION).doc(idNotas(grado,grupo,periodo)).onSnapshot(
+      snap => onData(snap.exists ? snap.data() : {notas:{}}),
+      err => { console.error('Error leyendo notas:', err); onError && onError(err); }
+    );
+  },
+  async marcar(grado,grupo,periodo,estudianteId,categoria,indiceN,valor,usuario){
+    if(!db) return;
+    await db.collection(NOTAS_COLLECTION).doc(idNotas(grado,grupo,periodo)).set({
+      grado,grupo:grupo||"",periodo,
+      [`notas.${estudianteId}.${categoria}.n${indiceN}`]:valor,
+      actualizadoPor:usuario||"",actualizadoEn:new Date().toISOString()
+    },{merge:true});
+  }
+};
+
+// ═══════════════════════════════════════════
 // SHORTCUTS
 // ═══════════════════════════════════════════
 const {useState,useEffect,useRef,createElement:h} = React;
@@ -1426,11 +1474,125 @@ function ComisionTotalView({students}){
   );
 }
 
-function AsistenciaInformesView({students,role,gradoFijo,grupoFijo,tipo}){
+function AsistenciaDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMarcar}){
+  const [fecha,setFecha]=useState(()=>new Date().toISOString().slice(0,10));
+  const [registros,setRegistros]=useState({});
+  const [loading,setLoading]=useState(true);
+  const [savingId,setSavingId]=useState(null);
+
+  useEffect(()=>{
+    if(!grado)return;
+    setLoading(true);
+    const unsub=asistenciaStorage.subscribe(grado,grupoEfectivo,fecha,(d)=>{setRegistros(d?.registros||{});setLoading(false);},()=>setLoading(false));
+    return ()=>unsub();
+  },[grado,grupoEfectivo,fecha]);
+
+  async function marcar(estId,estado){
+    if(!puedeMarcar)return;
+    setSavingId(estId);
+    try{ await asistenciaStorage.marcar(grado,grupoEfectivo,fecha,estId,estado,usuario); }
+    catch(e){ console.error(e); alert("No se pudo guardar: "+e.message); }
+    setSavingId(null);
+  }
+
+  const activos=lista.filter(s=>s.ESTADO!=="RETIRADO");
+  const conteo={P:0,A:0,T:0,E:0};
+  activos.forEach(s=>{ const v=registros[s._id]; if(v&&conteo[v]!==undefined) conteo[v]++; });
+
+  return h('div',{className:"space-y-3"},
+    h('div',{className:"flex flex-wrap items-center gap-3"},
+      h('label',{className:"text-xs font-medium text-slate-500"},"Fecha:"),
+      h('input',{type:"date",value:fecha,onChange:e=>setFecha(e.target.value),className:"border border-slate-200 rounded-lg px-3 py-1.5 text-sm"}),
+      !puedeMarcar&&h('span',{className:"text-xs text-amber-600"},"⚠️ Solo lectura (tu rol no puede marcar asistencia)")
+    ),
+    h('div',{className:"flex gap-2 flex-wrap"},
+      ESTADO_ASISTENCIA_OPTS.map(o=>h('span',{key:o.value,className:`px-2 py-1 rounded-full text-xs font-medium ${o.color}`},`${o.label}: ${conteo[o.value]||0}`))
+    ),
+    loading
+      ?h('p',{className:"text-sm text-slate-400 text-center py-8"},"Cargando...")
+      :h('div',{className:"bg-white rounded-xl border border-slate-200 divide-y divide-slate-100"},
+          activos.length===0?h('p',{className:"text-sm text-slate-400 text-center py-8"},"No hay estudiantes matriculados en este grado/grupo."):
+          activos.map((s,i)=>{
+            const nombre=[s.NOMBRE1,s.NOMBRE2,s.APELLIDO1,s.APELLIDO2].filter(Boolean).join(" ")||"(sin nombre)";
+            const actual=registros[s._id]||"";
+            return h('div',{key:s._id,className:"flex items-center justify-between gap-3 px-4 py-2.5 flex-wrap"},
+              h('span',{className:"text-sm text-slate-700"},i+1,". ",nombre,savingId===s._id&&h('span',{className:"text-xs text-indigo-500 ml-2"},"guardando...")),
+              h('div',{className:"flex gap-1.5"},ESTADO_ASISTENCIA_OPTS.map(o=>h('button',{key:o.value,disabled:!puedeMarcar,onClick:()=>marcar(s._id,o.value),className:`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${actual===o.value?o.color+" border-transparent":"bg-white text-slate-400 border-slate-200 hover:bg-slate-50"} ${!puedeMarcar?"cursor-not-allowed opacity-60":""}`},o.value)))
+            );
+          })
+        )
+  );
+}
+
+function NotasDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMarcar}){
+  const [periodo,setPeriodo]=useState("1");
+  const [notas,setNotas]=useState({});
+  const [loading,setLoading]=useState(true);
+
+  useEffect(()=>{
+    if(!grado)return;
+    setLoading(true);
+    const unsub=notasStorage.subscribe(grado,grupoEfectivo,periodo,(d)=>{setNotas(d?.notas||{});setLoading(false);},()=>setLoading(false));
+    return ()=>unsub();
+  },[grado,grupoEfectivo,periodo]);
+
+  async function marcar(estId,categoria,indiceN,valor){
+    if(!puedeMarcar)return;
+    const v=valor===""?"":Math.max(0,Math.min(5,parseFloat(valor.replace(",","."))||0));
+    setNotas(p=>({...p,[estId]:{...p[estId],[categoria]:{...(p[estId]?.[categoria]||{}),["n"+indiceN]:v}}}));
+    try{ await notasStorage.marcar(grado,grupoEfectivo,periodo,estId,categoria,indiceN,v,usuario); }
+    catch(e){ console.error(e); alert("No se pudo guardar: "+e.message); }
+  }
+
+  const activos=lista.filter(s=>s.ESTADO!=="RETIRADO");
+  const inputCls="w-14 border border-slate-200 rounded px-1 py-1 text-xs text-center";
+
+  return h('div',{className:"space-y-3"},
+    h('div',{className:"flex flex-wrap items-center gap-3"},
+      h('label',{className:"text-xs font-medium text-slate-500"},"Período:"),
+      h('select',{value:periodo,onChange:e=>setPeriodo(e.target.value),className:"border border-slate-200 rounded-lg px-3 py-1.5 text-sm"},["1","2","3","4"].map(p=>h('option',{key:p,value:p},"Período "+p))),
+      !puedeMarcar&&h('span',{className:"text-xs text-amber-600"},"⚠️ Solo lectura (tu rol no puede editar notas)")
+    ),
+    loading
+      ?h('p',{className:"text-sm text-slate-400 text-center py-8"},"Cargando...")
+      :h('div',{className:"bg-white rounded-xl border border-slate-200 overflow-x-auto"},
+          activos.length===0?h('p',{className:"text-sm text-slate-400 text-center py-8"},"No hay estudiantes matriculados en este grado/grupo."):
+          h('table',{className:"text-sm border-collapse min-w-[700px]"},
+            h('thead',null,
+              h('tr',{className:"bg-slate-50"},
+                h('th',{className:"text-left px-3 py-2 sticky left-0 bg-slate-50"},"Estudiante"),
+                CATEGORIAS_NOTA.map(c=>h('th',{key:c.id,colSpan:3,className:"text-center px-2 py-1 text-xs text-slate-500 border-l border-slate-200"},c.label))
+              ),
+              h('tr',{className:"bg-slate-50"},
+                h('th',{className:"sticky left-0 bg-slate-50"}),
+                CATEGORIAS_NOTA.map(c=>[1,2,3].map(n=>h('th',{key:c.id+n,className:"text-xs text-slate-400 font-normal px-1 border-l border-slate-100"},"N"+n)))
+              )
+            ),
+            h('tbody',null,activos.map((s,i)=>{
+              const nombre=[s.NOMBRE1,s.NOMBRE2,s.APELLIDO1,s.APELLIDO2].filter(Boolean).join(" ")||"(sin nombre)";
+              return h('tr',{key:s._id,className:"border-t border-slate-100"},
+                h('td',{className:"px-3 py-1.5 sticky left-0 bg-white whitespace-nowrap"},i+1,". ",nombre),
+                CATEGORIAS_NOTA.map(c=>[1,2,3].map(n=>{
+                  const v=notas[s._id]?.[c.id]?.["n"+n];
+                  return h('td',{key:c.id+n,className:"px-1 py-1 border-l border-slate-100 text-center"},
+                    h('input',{type:"text",inputMode:"decimal",disabled:!puedeMarcar,defaultValue:v??"",onBlur:e=>marcar(s._id,c.id,n,e.target.value),className:inputCls})
+                  );
+                }))
+              );
+            }))
+          )
+        )
+  );
+}
+
+function AsistenciaInformesView({students,role,usuario,gradoFijo,grupoFijo,tipo}){
   const soyDocente=role==="docente";
   const [grado,setGrado]=useState(soyDocente?(gradoFijo||""):"");
   const [grupo,setGrupo]=useState(soyDocente?(grupoFijo||""):"");
   const [grados,setGrados]=useState([]);
+  const [subVista,setSubVista]=useState("digital");
+  const [modoDigital,setModoDigital]=useState("asistencia");
+  const puedeMarcar=["docente","admin","coordinador"].includes(role);
   useEffect(()=>{ const unsub=gradosStorage.subscribe(setGrados,()=>{}); return ()=>unsub(); },[]);
   const gradosDisponibles=[...new Set(students.map(s=>s.GRADO).filter(Boolean))].sort();
   const gruposDisponibles=[...new Set(students.filter(s=>s.GRADO===grado).map(s=>s.GRUPO||""))].sort();
@@ -1464,9 +1626,22 @@ function AsistenciaInformesView({students,role,gradoFijo,grupoFijo,tipo}){
             h('select',{value:grado,onChange:e=>{setGrado(e.target.value);setGrupo("");},className:"border border-slate-200 rounded-lg px-3 py-2 text-sm"},h('option',{value:""},"— Seleccione un grado —"),gradosDisponibles.map(g=>h('option',{key:g,value:g},etiquetaGrado(g)))),
             grado&&gruposDisponibles.length>1&&h('select',{value:grupo,onChange:e=>setGrupo(e.target.value),className:"border border-slate-200 rounded-lg px-3 py-2 text-sm"},h('option',{value:""},"Todos los grupos"),gruposDisponibles.map(g=>h('option',{key:g,value:g},g||"(sin grupo)")))
           ),
-      grado&&h('button',{onClick:()=>tipo==="asistencia"?printAsistencia(students,grado,grupoEfectivo,tutor):printInformes(students,grado,grupoEfectivo,tutor),className:"mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"},"🖨️ Generar e imprimir ("+lista.length+" estudiante(s))")
+      tipo==="asistencia"&&grado&&h('div',{className:"flex gap-2 mt-3"},
+        h('button',{onClick:()=>setSubVista("digital"),className:`px-3 py-1.5 rounded-lg text-xs font-medium ${subVista==="digital"?"bg-indigo-600 text-white":"bg-slate-100 text-slate-600 hover:bg-slate-200"}`},"📱 Digital"),
+        h('button',{onClick:()=>setSubVista("imprimir"),className:`px-3 py-1.5 rounded-lg text-xs font-medium ${subVista==="imprimir"?"bg-indigo-600 text-white":"bg-slate-100 text-slate-600 hover:bg-slate-200"}`},"🖨️ Imprimir en blanco")
+      ),
+      grado&&(tipo==="informes"||subVista==="imprimir")&&h('button',{onClick:()=>tipo==="asistencia"?printAsistencia(students,grado,grupoEfectivo,tutor):printInformes(students,grado,grupoEfectivo,tutor),className:"mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"},"🖨️ Generar e imprimir ("+lista.length+" estudiante(s))")
     ),
-    grado&&h('div',{className:"bg-white rounded-xl border border-slate-200 p-4 overflow-x-auto"},
+    grado&&tipo==="asistencia"&&subVista==="digital"&&h('div',{className:"bg-white rounded-xl border border-slate-200 p-4"},
+      h('div',{className:"flex gap-2 mb-4"},
+        h('button',{onClick:()=>setModoDigital("asistencia"),className:`px-3 py-1.5 rounded-lg text-xs font-medium ${modoDigital==="asistencia"?"bg-emerald-600 text-white":"bg-slate-100 text-slate-600 hover:bg-slate-200"}`},"✅ Asistencia diaria"),
+        h('button',{onClick:()=>setModoDigital("notas"),className:`px-3 py-1.5 rounded-lg text-xs font-medium ${modoDigital==="notas"?"bg-emerald-600 text-white":"bg-slate-100 text-slate-600 hover:bg-slate-200"}`},"📝 Notas por período")
+      ),
+      modoDigital==="asistencia"
+        ?h(AsistenciaDigitalPanel,{lista,grado,grupoEfectivo,role,usuario,puedeMarcar})
+        :h(NotasDigitalPanel,{lista,grado,grupoEfectivo,role,usuario,puedeMarcar})
+    ),
+    grado&&(tipo==="informes"||subVista==="imprimir")&&h('div',{className:"bg-white rounded-xl border border-slate-200 p-4 overflow-x-auto"},
       h('p',{className:"text-xs font-semibold text-slate-500 mb-1 uppercase"},"Vista previa (así se imprime)"),
       h('p',{className:"text-xs text-slate-500 mb-3"},"Director(a) de grupo: ",h('strong',null,tutor||"Sin asignar")),
       lista.length===0
@@ -1947,12 +2122,12 @@ function App(){
         :!canEditFullForm
           ?h('div',null,
               h('div',{className:"flex gap-2 mb-4"},
-                h('button',{onClick:()=>setView("comision"),className:`px-3 py-1.5 rounded-lg text-sm font-medium transition ${view==="comision"||!["asistencia","informes"].includes(view)?"bg-indigo-600 text-white":"bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"}`},"📋 Comisión"),
+                h('button',{onClick:()=>setView("comision"),className:`px-3 py-1.5 rounded-lg text-sm font-medium transition ${view==="comision"||!["asistencia","informes","notas"].includes(view)?"bg-indigo-600 text-white":"bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"}`},"📋 Comisión"),
                 h('button',{onClick:()=>setView("asistencia"),className:`px-3 py-1.5 rounded-lg text-sm font-medium transition ${view==="asistencia"?"bg-indigo-600 text-white":"bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"}`},"📅 Asistencia"),
                 h('button',{onClick:()=>setView("informes"),className:`px-3 py-1.5 rounded-lg text-sm font-medium transition ${view==="informes"?"bg-indigo-600 text-white":"bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"}`},"📄 Informes")
               ),
               view==="asistencia"
-                ?h(AsistenciaInformesView,{students,role,gradoFijo:session.grado||"",grupoFijo:session.grupo||"",tipo:"asistencia"})
+                ?h(AsistenciaInformesView,{students,role,usuario:session.nombre||session.email,gradoFijo:session.grado||"",grupoFijo:session.grupo||"",tipo:"asistencia"})
                 :view==="informes"
                   ?h(AsistenciaInformesView,{students,role,gradoFijo:session.grado||"",grupoFijo:session.grupo||"",tipo:"informes"})
                   :h(ComisionView,{students,role,usuario:session.nombre||session.email,gradoFijo:session.grado||"",grupoFijo:session.grupo||"",onSave:async(s)=>{await studentsStorage.saveOne(s);showSt("Guardado correctamente.");}})
@@ -2102,7 +2277,7 @@ function App(){
           view==="reports"&&h(ReportsView,{students}),
           view==="comisionTotal"&&h(ComisionTotalView,{students}),
           view==="comision"&&h(ComisionView,{students,role,usuario:session.nombre||session.email,gradoFijo:"",grupoFijo:"",onSave:async(s)=>{await studentsStorage.saveOne(s);showSt("Guardado correctamente.");}}),
-          view==="asistencia"&&h(AsistenciaInformesView,{students,role,gradoFijo:"",grupoFijo:"",tipo:"asistencia"}),
+          view==="asistencia"&&h(AsistenciaInformesView,{students,role,usuario:session.nombre||session.email,gradoFijo:"",grupoFijo:"",tipo:"asistencia"}),
           view==="informes"&&h(AsistenciaInformesView,{students,role,gradoFijo:"",grupoFijo:"",tipo:"informes"})
         )
     )
