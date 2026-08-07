@@ -459,7 +459,7 @@ const SECTIONS=[{id:"ident",label:"Variables Básicas"},{id:"personal",label:"Si
 
 const FIELD_DEFS=[
   {id:"ANNO_INF",label:"Año de información",type:"number",section:"ident",min:2000,max:2030},
-  {id:"PER_ID",label:"ID Persona",type:"text",section:"ident",hidden:true},
+  {id:"PER_ID",label:"ID Persona",type:"text",section:"ident"},
   {id:"TIPO_DOCUMENTO",label:"Tipo de documento",type:"select",section:"ident",options:TIPO_DOC_OPTS},
   {id:"NRO_DOCUMENTO",label:"Número de documento",type:"text",section:"ident",validate:"digits"},
   {id:"APELLIDO1",label:"Primer apellido",type:"text",section:"ident",validate:"alpha"},
@@ -531,7 +531,17 @@ function normalizeKey(k){return String(k||"").normalize("NFD").replace(/[\u0300-
 const FIELD_KEY_MAP={};FIELD_DEFS.forEach(f=>{FIELD_KEY_MAP[normalizeKey(f.id)]=f.id;});
 function countBy(arr,fid){const c={};arr.forEach(s=>{const v=s[fid];if(v)c[v]=(c[v]||0)+1;});return Object.entries(c).map(([name,total])=>({name,total}));}
 function countMulti(arr,fids){const c={};arr.forEach(s=>{fids.forEach(f=>{(s[f]||"").split("|").filter(Boolean).forEach(v=>{c[v]=(c[v]||0)+1;});});});return Object.entries(c).map(([name,total])=>({name,total})).sort((a,b)=>b.total-a.total);}
-function matchVal(opts,raw){if(!raw)return "";const tries=[raw,String(raw).padStart(2,"0"),String(raw).replace(/^0+/,"")];for(const t of tries){const f=opts.find(o=>(typeof o==="object"?o.value:o)===t);if(f)return typeof f==="object"?f.value:f;}return raw;}
+function matchVal(opts,raw){
+  if(!raw)return "";
+  const tries=[raw,String(raw).padStart(2,"0"),String(raw).replace(/^0+/,"")];
+  for(const t of tries){const f=opts.find(o=>(typeof o==="object"?o.value:o)===t);if(f)return typeof f==="object"?f.value:f;}
+  // Coincidencia flexible: sin distinguir mayúsculas/minúsculas ni espacios extra (útil para datos importados de Excel)
+  const norm=s=>String(s).trim().toLowerCase().replace(/\s+/g," ");
+  const rawNorm=norm(raw);
+  const flexible=opts.find(o=>norm(typeof o==="object"?o.value:o)===rawNorm);
+  if(flexible) return typeof flexible==="object"?flexible.value:flexible;
+  return raw;
+}
 function resolveLabel(field,value){
   if(!value)return "—";
   if(field.type==="yesno")return value==="S"?"Sí":value==="N"?"No":value;
