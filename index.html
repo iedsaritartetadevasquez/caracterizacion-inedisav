@@ -319,6 +319,12 @@ const asistenciaStorage = {
       registros:{[estudianteId]:estado},
       actualizadoPor:usuario||"",actualizadoEn:new Date().toISOString()
     },{merge:true});
+  },
+  // Trae todos los días registrados de un grado/grupo (para el reporte consolidado)
+  async getResumen(grado,grupo){
+    if(!db) return [];
+    const snap=await db.collection(ASISTENCIA_COLLECTION).where('grado','==',grado).where('grupo','==',grupo||"").get();
+    return snap.docs.map(d=>d.data());
   }
 };
 
@@ -327,6 +333,28 @@ const asistenciaStorage = {
 // ═══════════════════════════════════════════
 const NOTAS_COLLECTION = 'inedisav_notas';
 const CATEGORIAS_NOTA=[{id:"saber",label:"Saber"},{id:"saberHacer",label:"Saber Hacer"},{id:"ser",label:"Ser"}];
+const PESOS_PERIODO=[0.30,0.30,0.40]; // Período 1, 2, 3
+
+// Promedio de N1,N2,N3 dentro de una categoría (Saber / Saber Hacer / Ser)
+function promedioCategoria(catObj){
+  const vals=["n1","n2","n3"].map(k=>catObj?.[k]).filter(v=>v!==undefined&&v!==null&&v!=="").map(Number).filter(v=>!isNaN(v));
+  if(!vals.length) return null;
+  return vals.reduce((a,b)=>a+b,0)/vals.length;
+}
+// Nota final del período = promedio simple de Saber, Saber Hacer y Ser (33.3% cada una)
+function notaFinalPeriodo(notaEstudiante){
+  const vals=CATEGORIAS_NOTA.map(c=>promedioCategoria(notaEstudiante?.[c.id])).filter(v=>v!==null);
+  if(!vals.length) return null;
+  return vals.reduce((a,b)=>a+b,0)/vals.length;
+}
+// Nota final del año = P1×30% + P2×30% + P3×40% (solo con los períodos que ya tengan nota)
+function notaFinalAnio(p1,p2,p3){
+  const notas=[p1,p2,p3];
+  let sumaPeso=0,sumaPonderada=0;
+  notas.forEach((n,i)=>{ if(n!==null&&n!==undefined){ sumaPonderada+=n*PESOS_PERIODO[i]; sumaPeso+=PESOS_PERIODO[i]; } });
+  if(sumaPeso===0) return null;
+  return sumaPonderada/sumaPeso;
+}
 function idNotas(grado,grupo,periodo){ return `${grado}_${grupo||"unico"}_P${periodo}`; }
 const notasStorage = {
   subscribe(grado,grupo,periodo,onData,onError){
@@ -343,6 +371,14 @@ const notasStorage = {
       notas:{[estudianteId]:{[categoria]:{["n"+indiceN]:valor}}},
       actualizadoPor:usuario||"",actualizadoEn:new Date().toISOString()
     },{merge:true});
+  },
+  // Trae las notas de los 3 períodos de un grado/grupo (para el reporte consolidado)
+  async getTodosPeriodos(grado,grupo){
+    if(!db) return {1:{},2:{},3:{}};
+    const docs=await Promise.all(["1","2","3"].map(p=>db.collection(NOTAS_COLLECTION).doc(idNotas(grado,grupo,p)).get()));
+    const out={};
+    docs.forEach((snap,i)=>{ out[i+1]=snap.exists?(snap.data().notas||{}):{}; });
+    return out;
   }
 };
 
@@ -1489,6 +1525,7 @@ function AsistenciaDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMar
   const [registros,setRegistros]=useState({});
   const [loading,setLoading]=useState(true);
   const [savingId,setSavingId]=useState(null);
+  const [guardadoId,setGuardadoId]=useState("");
 
   useEffect(()=>{
     if(!grado)return;
@@ -1500,7 +1537,11 @@ function AsistenciaDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMar
   async function marcar(estId,estado){
     if(!puedeMarcar)return;
     setSavingId(estId);
-    try{ await asistenciaStorage.marcar(grado,grupoEfectivo,fecha,estId,estado,usuario); }
+    try{
+      await asistenciaStorage.marcar(grado,grupoEfectivo,fecha,estId,estado,usuario);
+      setGuardadoId(estId);
+      setTimeout(()=>setGuardadoId(""),1500);
+    }
     catch(e){ console.error(e); alert("No se pudo guardar: "+e.message); }
     setSavingId(null);
   }
@@ -1526,7 +1567,7 @@ function AsistenciaDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMar
             const nombre=[s.NOMBRE1,s.NOMBRE2,s.APELLIDO1,s.APELLIDO2].filter(Boolean).join(" ")||"(sin nombre)";
             const actual=registros[s._id]||"";
             return h('div',{key:s._id,className:"flex items-center justify-between gap-3 px-4 py-2.5 flex-wrap"},
-              h('span',{className:"text-sm text-slate-700"},i+1,". ",nombre,savingId===s._id&&h('span',{className:"text-xs text-indigo-500 ml-2"},"guardando...")),
+              h('span',{className:"text-sm text-slate-700"},i+1,". ",nombre,savingId===s._id&&h('span',{className:"text-xs text-indigo-500 ml-2"},"guardando..."),guardadoId===s._id&&h('span',{className:"text-xs text-emerald-600 ml-2"},"✓ Guardado")),
               h('div',{className:"flex gap-1.5"},ESTADO_ASISTENCIA_OPTS.map(o=>h('button',{key:o.value,disabled:!puedeMarcar,onClick:()=>marcar(s._id,o.value),className:`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${actual===o.value?o.color+" border-transparent":"bg-white text-slate-400 border-slate-200 hover:bg-slate-50"} ${!puedeMarcar?"cursor-not-allowed opacity-60":""}`},o.value)))
             );
           })
@@ -1538,6 +1579,7 @@ function NotasDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMarcar})
   const [periodo,setPeriodo]=useState("1");
   const [notas,setNotas]=useState({});
   const [loading,setLoading]=useState(true);
+  const [guardadoId,setGuardadoId]=useState("");
 
   useEffect(()=>{
     if(!grado)return;
@@ -1550,7 +1592,11 @@ function NotasDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMarcar})
     if(!puedeMarcar)return;
     const v=valor===""?"":Math.max(0,Math.min(5,parseFloat(valor.replace(",","."))||0));
     setNotas(p=>({...p,[estId]:{...p[estId],[categoria]:{...(p[estId]?.[categoria]||{}),["n"+indiceN]:v}}}));
-    try{ await notasStorage.marcar(grado,grupoEfectivo,periodo,estId,categoria,indiceN,v,usuario); }
+    try{
+      await notasStorage.marcar(grado,grupoEfectivo,periodo,estId,categoria,indiceN,v,usuario);
+      setGuardadoId(estId+categoria+indiceN);
+      setTimeout(()=>setGuardadoId(""),1500);
+    }
     catch(e){ console.error(e); alert("No se pudo guardar: "+e.message); }
   }
 
@@ -1563,35 +1609,121 @@ function NotasDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMarcar})
       h('select',{value:periodo,onChange:e=>setPeriodo(e.target.value),className:"border border-slate-200 rounded-lg px-3 py-1.5 text-sm"},["1","2","3"].map(p=>h('option',{key:p,value:p},"Período "+p))),
       !puedeMarcar&&h('span',{className:"text-xs text-amber-600"},"⚠️ Solo lectura (tu rol no puede editar notas)")
     ),
+    h('p',{className:"text-xs text-slate-400"},"Nota final del período = promedio de Saber, Saber Hacer y Ser (33.3% cada una). Cada categoría es el promedio de N1, N2 y N3."),
     loading
       ?h('p',{className:"text-sm text-slate-400 text-center py-8"},"Cargando...")
       :h('div',{className:"bg-white rounded-xl border border-slate-200 overflow-x-auto"},
           activos.length===0?h('p',{className:"text-sm text-slate-400 text-center py-8"},"No hay estudiantes matriculados en este grado/grupo."):
-          h('table',{className:"text-sm border-collapse min-w-[700px]"},
+          h('table',{className:"text-sm border-collapse min-w-[780px]"},
             h('thead',null,
               h('tr',{className:"bg-slate-50"},
                 h('th',{className:"text-left px-3 py-2 sticky left-0 bg-slate-50"},"Estudiante"),
-                CATEGORIAS_NOTA.map(c=>h('th',{key:c.id,colSpan:3,className:"text-center px-2 py-1 text-xs text-slate-500 border-l border-slate-200"},c.label))
+                CATEGORIAS_NOTA.map(c=>h('th',{key:c.id,colSpan:3,className:"text-center px-2 py-1 text-xs text-slate-500 border-l border-slate-200"},c.label)),
+                h('th',{className:"text-center px-2 py-1 text-xs text-indigo-600 font-semibold border-l border-slate-200"},"Final")
               ),
               h('tr',{className:"bg-slate-50"},
                 h('th',{className:"sticky left-0 bg-slate-50"}),
-                CATEGORIAS_NOTA.map(c=>[1,2,3].map(n=>h('th',{key:c.id+n,className:"text-xs text-slate-400 font-normal px-1 border-l border-slate-100"},"N"+n)))
+                CATEGORIAS_NOTA.map(c=>[1,2,3].map(n=>h('th',{key:c.id+n,className:"text-xs text-slate-400 font-normal px-1 border-l border-slate-100"},"N"+n))),
+                h('th',{className:"border-l border-slate-200"})
               )
             ),
             h('tbody',null,activos.map((s,i)=>{
               const nombre=[s.NOMBRE1,s.NOMBRE2,s.APELLIDO1,s.APELLIDO2].filter(Boolean).join(" ")||"(sin nombre)";
+              const final=notaFinalPeriodo(notas[s._id]);
               return h('tr',{key:s._id,className:"border-t border-slate-100"},
                 h('td',{className:"px-3 py-1.5 sticky left-0 bg-white whitespace-nowrap"},i+1,". ",nombre),
                 CATEGORIAS_NOTA.map(c=>[1,2,3].map(n=>{
                   const v=notas[s._id]?.[c.id]?.["n"+n];
-                  return h('td',{key:c.id+n,className:"px-1 py-1 border-l border-slate-100 text-center"},
-                    h('input',{type:"text",inputMode:"decimal",disabled:!puedeMarcar,defaultValue:v??"",onBlur:e=>marcar(s._id,c.id,n,e.target.value),className:inputCls})
+                  const key=s._id+c.id+n;
+                  return h('td',{key,className:"px-1 py-1 border-l border-slate-100 text-center"},
+                    h('input',{type:"text",inputMode:"decimal",disabled:!puedeMarcar,defaultValue:v??"",onBlur:e=>marcar(s._id,c.id,n,e.target.value),className:inputCls+(guardadoId===key?" border-emerald-400 bg-emerald-50":"")}),
+                    guardadoId===key&&h('span',{className:"block text-[9px] text-emerald-600"},"✓")
                   );
-                }))
+                })),
+                h('td',{className:"px-2 py-1.5 border-l border-slate-200 text-center font-semibold text-indigo-700"},final===null?"—":final.toFixed(1))
               );
             }))
           )
         )
+  );
+}
+
+function ReporteAsistenciaNotas({lista,grado,grupoEfectivo}){
+  const [resumenAsist,setResumenAsist]=useState(null);
+  const [resumenNotas,setResumenNotas]=useState(null);
+  const [loading,setLoading]=useState(true);
+
+  async function cargar(){
+    if(!grado)return;
+    setLoading(true);
+    try{
+      const [dias,periodos]=await Promise.all([
+        asistenciaStorage.getResumen(grado,grupoEfectivo),
+        notasStorage.getTodosPeriodos(grado,grupoEfectivo)
+      ]);
+      setResumenAsist(dias);
+      setResumenNotas(periodos);
+    }catch(e){ console.error(e); }
+    setLoading(false);
+  }
+  useEffect(()=>{ cargar(); },[grado,grupoEfectivo]);
+
+  const activos=lista.filter(s=>s.ESTADO!=="RETIRADO");
+
+  function conteoAsistencia(estId){
+    const c={P:0,A:0,T:0,E:0};
+    (resumenAsist||[]).forEach(dia=>{ const v=dia.registros?.[estId]; if(v&&c[v]!==undefined) c[v]++; });
+    const total=c.P+c.A+c.T+c.E;
+    const pct=total?Math.round((c.P/total)*100):null;
+    return {...c,total,pct};
+  }
+  function notasDe(estId){
+    const p1=resumenNotas?notaFinalPeriodo(resumenNotas[1]?.[estId]):null;
+    const p2=resumenNotas?notaFinalPeriodo(resumenNotas[2]?.[estId]):null;
+    const p3=resumenNotas?notaFinalPeriodo(resumenNotas[3]?.[estId]):null;
+    const anual=notaFinalAnio(p1,p2,p3);
+    return {p1,p2,p3,anual};
+  }
+  const fmt=n=>n===null||n===undefined?"—":n.toFixed(1);
+
+  return h('div',{className:"space-y-4"},
+    h('div',{className:"flex items-center justify-between"},
+      h('p',{className:"text-xs text-slate-500"},"Consolidado de asistencia (todos los días registrados) y notas (los 3 períodos) del grado/grupo seleccionado."),
+      h('button',{onClick:cargar,className:"text-xs px-3 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50"},"🔄 Actualizar")
+    ),
+    loading
+      ?h('p',{className:"text-sm text-slate-400 text-center py-8"},"Cargando...")
+      :activos.length===0
+        ?h('p',{className:"text-sm text-slate-400 text-center py-8"},"No hay estudiantes matriculados en este grado/grupo.")
+        :h('div',{className:"bg-white rounded-xl border border-slate-200 overflow-x-auto"},
+            h('table',{className:"text-sm border-collapse min-w-[820px] w-full"},
+              h('thead',null,
+                h('tr',{className:"bg-slate-50 text-xs text-slate-500"},
+                  h('th',{className:"text-left px-3 py-2 sticky left-0 bg-slate-50"},"Estudiante"),
+                  h('th',{className:"px-2 py-2 border-l border-slate-200",colSpan:5},"Asistencia"),
+                  h('th',{className:"px-2 py-2 border-l border-slate-200",colSpan:4},"Notas")
+                ),
+                h('tr',{className:"bg-slate-50 text-[10px] text-slate-400"},
+                  h('th',{className:"sticky left-0 bg-slate-50"}),
+                  h('th',{className:"border-l border-slate-100"},"P"),h('th',null,"A"),h('th',null,"T"),h('th',null,"E"),h('th',null,"% Asist."),
+                  h('th',{className:"border-l border-slate-100"},"P1"),h('th',null,"P2"),h('th',null,"P3"),h('th',{className:"text-indigo-600 font-semibold"},"Año")
+                )
+              ),
+              h('tbody',null,activos.map((s,i)=>{
+                const nombre=[s.NOMBRE1,s.NOMBRE2,s.APELLIDO1,s.APELLIDO2].filter(Boolean).join(" ")||"(sin nombre)";
+                const a=conteoAsistencia(s._id);
+                const n=notasDe(s._id);
+                return h('tr',{key:s._id,className:"border-t border-slate-100 text-center"},
+                  h('td',{className:"text-left px-3 py-1.5 sticky left-0 bg-white whitespace-nowrap"},i+1,". ",nombre),
+                  h('td',{className:"border-l border-slate-100"},a.P),h('td',null,a.A),h('td',null,a.T),h('td',null,a.E),
+                  h('td',{className:a.pct!==null&&a.pct<80?"text-rose-600 font-medium":""},a.pct===null?"—":a.pct+"%"),
+                  h('td',{className:"border-l border-slate-100"},fmt(n.p1)),h('td',null,fmt(n.p2)),h('td',null,fmt(n.p3)),
+                  h('td',{className:"font-semibold text-indigo-700"},fmt(n.anual))
+                );
+              }))
+            )
+          ),
+    h('p',{className:"text-[11px] text-slate-400"},"P=Presente, A=Ausente, T=Tarde, E=Excusa. Nota del año = P1×30% + P2×30% + P3×40%.")
   );
 }
 
@@ -1638,6 +1770,7 @@ function AsistenciaInformesView({students,role,usuario,gradoFijo,grupoFijo,tipo}
           ),
       tipo==="asistencia"&&grado&&h('div',{className:"flex gap-2 mt-3"},
         h('button',{onClick:()=>setSubVista("digital"),className:`px-3 py-1.5 rounded-lg text-xs font-medium ${subVista==="digital"?"bg-indigo-600 text-white":"bg-slate-100 text-slate-600 hover:bg-slate-200"}`},"📱 Digital"),
+        h('button',{onClick:()=>setSubVista("reporte"),className:`px-3 py-1.5 rounded-lg text-xs font-medium ${subVista==="reporte"?"bg-indigo-600 text-white":"bg-slate-100 text-slate-600 hover:bg-slate-200"}`},"📊 Reporte"),
         h('button',{onClick:()=>setSubVista("imprimir"),className:`px-3 py-1.5 rounded-lg text-xs font-medium ${subVista==="imprimir"?"bg-indigo-600 text-white":"bg-slate-100 text-slate-600 hover:bg-slate-200"}`},"🖨️ Imprimir en blanco")
       ),
       grado&&(tipo==="informes"||subVista==="imprimir")&&h('button',{onClick:()=>tipo==="asistencia"?printAsistencia(students,grado,grupoEfectivo,tutor):printInformes(students,grado,grupoEfectivo,tutor),className:"mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"},"🖨️ Generar e imprimir ("+lista.length+" estudiante(s))")
@@ -1650,6 +1783,9 @@ function AsistenciaInformesView({students,role,usuario,gradoFijo,grupoFijo,tipo}
       modoDigital==="asistencia"
         ?h(AsistenciaDigitalPanel,{lista,grado,grupoEfectivo,role,usuario,puedeMarcar})
         :h(NotasDigitalPanel,{lista,grado,grupoEfectivo,role,usuario,puedeMarcar})
+    ),
+    grado&&tipo==="asistencia"&&subVista==="reporte"&&h('div',{className:"bg-white rounded-xl border border-slate-200 p-4"},
+      h(ReporteAsistenciaNotas,{lista,grado,grupoEfectivo})
     ),
     grado&&(tipo==="informes"||subVista==="imprimir")&&h('div',{className:"bg-white rounded-xl border border-slate-200 p-4 overflow-x-auto"},
       h('p',{className:"text-xs font-semibold text-slate-500 mb-1 uppercase"},"Vista previa (así se imprime)"),
