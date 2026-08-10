@@ -422,7 +422,7 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-normalizacion-v2";
+const APP_VERSION = "2026-08-10-diagnostico-v3";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900"};
@@ -2170,8 +2170,14 @@ function App(){
         let diff=false;const norm={...s};
         FIELD_DEFS.forEach(f=>{
           const cur=s[f.id];
+          if(["RUTA","TRANSPORTADOR","ESTADO_SIMAT"].includes(f.id)){
+            console.log(`[Normalizar][${f.id}] estudiante="${s.NOMBRE1||""} ${s.APELLIDO1||""}" _id=${s._id} valorActual=${JSON.stringify(cur)} tipo=${typeof cur}`);
+          }
           if(cur==null||cur==="") return;
           const nv=normalizeFieldValue(f,cur);
+          if(["RUTA","TRANSPORTADOR","ESTADO_SIMAT"].includes(f.id)){
+            console.log(`[Normalizar][${f.id}]   -> propuesto=${JSON.stringify(nv)} cambia=${nv!==cur}`);
+          }
           if(nv!==cur){norm[f.id]=nv;diff=true;}
         });
         if(diff) changed.push(norm);
