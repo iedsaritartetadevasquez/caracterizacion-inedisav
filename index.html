@@ -420,6 +420,10 @@ const Icons = {
 // ═══════════════════════════════════════════
 // DATOS
 // ═══════════════════════════════════════════
+// Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
+// navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
+const APP_VERSION = "2026-08-10-normalizacion-v2";
+console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900"};
 const ROLE_TAG    = {admin:"bg-indigo-100 text-indigo-700",rector:"bg-purple-100 text-purple-700",coordinador:"bg-amber-100 text-amber-700",orientacion:"bg-teal-100 text-teal-700",docente:"bg-emerald-100 text-emerald-700",auxiliar:"bg-sky-100 text-sky-700"};
@@ -2255,7 +2259,8 @@ function App(){
             h('span',{className:`w-2 h-2 rounded-full ${db?"bg-emerald-400":"bg-amber-400"}`}),
             db?"Firebase":"Local"
           ),
-          h('button',{onClick:()=>{auth&&auth.signOut();setSession(null);},className:"px-3 py-1.5 rounded-lg text-sm font-medium bg-white/10 hover:bg-white/20 border border-white/30"},"Salir")
+          h('button',{onClick:()=>{auth&&auth.signOut();setSession(null);},className:"px-3 py-1.5 rounded-lg text-sm font-medium bg-white/10 hover:bg-white/20 border border-white/30"},"Salir"),
+          h('span',{className:"text-[9px] text-white/40",title:"Versión del sistema cargada en este navegador"},APP_VERSION)
         )
       ),
       h('div',{className:"max-w-6xl mx-auto px-4 sm:px-6 py-2.5 flex items-center justify-between gap-3 flex-wrap"},
