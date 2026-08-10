@@ -576,12 +576,14 @@ function matchVal(opts,raw){
   if(!raw)return "";
   const tries=[raw,String(raw).padStart(2,"0"),String(raw).replace(/^0+/,"")];
   for(const t of tries){const f=opts.find(o=>(typeof o==="object"?o.value:o)===t);if(f)return typeof f==="object"?f.value:f;}
-  // Coincidencia flexible: sin distinguir mayúsculas/minúsculas ni espacios extra (útil para datos importados de Excel)
-  const norm=s=>String(s).trim().toLowerCase().replace(/\s+/g," ");
+  // Coincidencia flexible: sin distinguir mayúsculas/minúsculas, tildes, puntos ni espacios extra
+  // (útil para datos importados de Excel o texto libre guardado antes de que el campo fuera una lista)
+  const norm=s=>String(s).normalize("NFD").replace(/[\u0300-\u036f]/g,"").trim().toLowerCase().replace(/[.,]/g,"").replace(/\s+/g," ");
   const rawNorm=norm(raw);
   const flexible=opts.find(o=>norm(typeof o==="object"?o.value:o)===rawNorm);
   if(flexible) return typeof flexible==="object"?flexible.value:flexible;
-  return raw;
+  // Sin coincidencia alguna: no se deja el texto en minúscula, se formatea en Tipo Oración
+  return String(raw).trim().toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase());
 }
 // Normaliza un valor según las reglas del campo: mayúsculas en texto/alfanumérico
 // y coincidencia contra las opciones válidas en selects (ignora mayúsculas/espacios,
