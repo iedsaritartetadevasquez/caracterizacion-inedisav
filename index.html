@@ -497,7 +497,7 @@ const FIELD_DEFS=[
   {id:"ANNO_INF",label:"Año de información",type:"number",section:"ident",min:2000,max:2030},
   {id:"PER_ID",label:"ID Persona",type:"text",section:"ident"},
   {id:"TIPO_DOCUMENTO",label:"Tipo de documento",type:"select",section:"ident",options:TIPO_DOC_OPTS},
-  {id:"NRO_DOCUMENTO",label:"Número de documento",type:"text",section:"ident",validate:"digits"},
+  {id:"NRO_DOCUMENTO",label:"Número de documento",type:"text",section:"ident",validate:"alnum"},
   {id:"APELLIDO1",label:"Primer apellido",type:"text",section:"ident",validate:"alpha"},
   {id:"APELLIDO2",label:"Segundo apellido",type:"text",section:"ident",validate:"alpha"},
   {id:"NOMBRE1",label:"Primer nombre",type:"text",section:"ident",validate:"alpha"},
@@ -526,7 +526,7 @@ const FIELD_DEFS=[
   {id:"EDUCACION_PREESCOLAR",label:"¿Realizó educación preescolar?",type:"yesno",section:"historial"},
   {id:"ANOS_EDUCACION_PREESCOLAR",label:"Años de educación preescolar",type:"number",section:"historial",min:0,max:3},
   {id:"RET_EST_SIN_TERMINAR_ANO_ESC",label:"¿Se retiró sin terminar el año?",type:"yesno",section:"historial"},
-  {id:"MESES_POR_FUERA_SIS_EDUCATIVO",label:"Meses fuera del sistema educativo",type:"number",section:"historial",min:1,max:36},
+  {id:"MESES_POR_FUERA_SIS_EDUCATIVO",label:"Meses fuera del sistema educativo",type:"number",section:"historial",min:0,max:36},
   {id:"ABANDONOS_TEMPORALES",label:"Número de abandonos temporales",type:"number",section:"historial",min:0,max:3},
   {id:"REPETIDA_ANO",label:"¿Ha repetido año?",type:"yesno",section:"historial"},
   {id:"VECES_REPETIDA_ANO",label:"Veces que ha repetido año",type:"number",section:"historial",min:0,max:4},
@@ -545,7 +545,7 @@ const FIELD_DEFS=[
   {id:"FECHA_RETIRO",label:"Fecha de retiro",type:"date",section:"desercion"},
   {id:"RAZON_DESERCION_OTRAS",label:"Otra razón (especifique)",type:"text",section:"desercion"},
   {id:"TIPO_DOCUMENTO_FAMILIAR",label:"Tipo de documento (acudiente)",type:"select",section:"familiar",options:TIPO_DOC_FAM_OPTS},
-  {id:"NRO_DOCUMENTO_FAMILAIR",label:"Número de documento (acudiente)",type:"text",section:"familiar",validate:"digits"},
+  {id:"NRO_DOCUMENTO_FAMILAIR",label:"Número de documento (acudiente)",type:"text",section:"familiar",validate:"alnum"},
   {id:"APELLIDO1_FAMILIAR",label:"Primer apellido (acudiente)",type:"text",section:"familiar",validate:"alpha"},
   {id:"APELLIDO2_FAMILIAR",label:"Segundo apellido (acudiente)",type:"text",section:"familiar",validate:"alpha"},
   {id:"NOMBRE1_FAMILIAR",label:"Primer nombre (acudiente)",type:"text",section:"familiar",validate:"alpha"},
@@ -565,7 +565,12 @@ function emptyStudent(){const o={};FIELD_DEFS.forEach(f=>{o[f.id]="";});o._id=nu
 function riskCount(s){if(s.ESTADO==="RETIRADO")return -1;return RISK_FIELDS.filter(f=>s[f]==="S").length;}
 function normalizeKey(k){return String(k||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/\(.*?\)/g,"").replace(/ALT\s*\+?\s*124/g,"").replace(/[¿?]/g,"").replace(/[^A-Z0-9]+/g,"_").replace(/_+/g,"_").replace(/^_|_$/g,"");}
 const FIELD_KEY_MAP={};FIELD_DEFS.forEach(f=>{FIELD_KEY_MAP[normalizeKey(f.id)]=f.id;});
-function countBy(arr,fid){const c={};arr.forEach(s=>{const v=s[fid];if(v)c[v]=(c[v]||0)+1;});return Object.entries(c).map(([name,total])=>({name,total}));}
+function countBy(arr,fid){
+  const field=FIELD_DEFS.find(f=>f.id===fid);
+  const opts=field&&field.type==="select"?field.options||[]:null;
+  const c={};arr.forEach(s=>{let v=s[fid];if(!v)return;if(opts)v=matchVal(opts,v);c[v]=(c[v]||0)+1;});
+  return Object.entries(c).map(([name,total])=>({name,total}));
+}
 function countMulti(arr,fids){const c={};arr.forEach(s=>{fids.forEach(f=>{(s[f]||"").split("|").filter(Boolean).forEach(v=>{c[v]=(c[v]||0)+1;});});});return Object.entries(c).map(([name,total])=>({name,total})).sort((a,b)=>b.total-a.total);}
 function matchVal(opts,raw){
   if(!raw)return "";
@@ -577,6 +582,18 @@ function matchVal(opts,raw){
   const flexible=opts.find(o=>norm(typeof o==="object"?o.value:o)===rawNorm);
   if(flexible) return typeof flexible==="object"?flexible.value:flexible;
   return raw;
+}
+// Normaliza un valor según las reglas del campo: mayúsculas en texto/alfanumérico
+// y coincidencia contra las opciones válidas en selects (ignora mayúsculas/espacios,
+// útil para datos importados de Excel con distinta capitalización).
+function normalizeFieldValue(field,raw){
+  let v=String(raw??"").trim();
+  if(!v) return v;
+  if(field.validate==="alpha") v=v.replace(/[^A-Za-zÁÉÍÓÚÑÜáéíóúñü\s]/g,"").toUpperCase().replace(/\s+/g," ").trim();
+  else if(field.validate==="alnum") v=v.replace(/[^A-Za-z0-9]/g,"").toUpperCase();
+  else if(field.validate==="digits") v=v.replace(/[^0-9]/g,"");
+  if((field.type==="select"||field.type==="dependent_select")&&(field.options||[]).length) v=matchVal(field.options,v);
+  return v;
 }
 function resolveLabel(field,value){
   if(!value)return "—";
@@ -729,8 +746,9 @@ function FieldRenderer({field,value,onChange,parentValue,disabled,allowedOptions
 
   let input;
   const filterByValidate=(str,validate)=>{
-    if(validate==="alpha") return str.replace(/[^A-Za-zÁÉÍÓÚÑÜáéíóúñü\s]/g,"");
+    if(validate==="alpha") return str.replace(/[^A-Za-zÁÉÍÓÚÑÜáéíóúñü\s]/g,"").toUpperCase();
     if(validate==="digits") return str.replace(/[^0-9]/g,"");
+    if(validate==="alnum") return str.replace(/[^A-Za-z0-9]/g,"").toUpperCase();
     return str;
   };
   if(field.type==="text") input=h('input',{type:"text",value:value||"",inputMode:field.validate==="digits"?"numeric":"text",onChange:e=>onChange(filterByValidate(e.target.value,field.validate)),className:ic});
@@ -949,7 +967,7 @@ function emptyPersonal(){ const o={}; PERSONAL_FIELD_DEFS.forEach(f=>o[f.id]="")
 
 function PersonalFormFields({data,onChange}){
   const ic="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400";
-  const filterAlpha=s=>s.replace(/[^A-Za-zÁÉÍÓÚÑÜáéíóúñü\s]/g,"");
+  const filterAlpha=s=>s.replace(/[^A-Za-zÁÉÍÓÚÑÜáéíóúñü\s]/g,"").toUpperCase();
   const filterDigits=s=>s.replace(/[^0-9]/g,"");
   return h('div',{className:"grid grid-cols-1 md:grid-cols-2 gap-4"},PERSONAL_FIELD_DEFS.map(f=>{
     let input;
@@ -1070,7 +1088,7 @@ function PersonalPanel({onClose,usuario,rol}){
       };
       const mapped=rows.map(r=>({
         cedula:String(r["NUMERO DE CEDULA"]||"").trim(),
-        nombres:String(r["NOMBRES Y APELLIDOS"]||"").trim(),
+        nombres:String(r["NOMBRES Y APELLIDOS"]||"").trim().toUpperCase(),
         fechaNacimiento:fmtDate(r["FECHA NACIMIENTO"]),
         sexo:String(r["SEXO"]||"").trim(),
         correo:String(r["CORREO ELECTRONICO"]||"").trim().toLowerCase(),
@@ -2075,6 +2093,7 @@ function App(){
       if(!v) continue;
       if(f.validate==="alpha" && !/^[A-Za-zÁÉÍÓÚÑÜáéíóúñü\s]+$/.test(v)) return `"${f.label}" solo puede contener letras.`;
       if(f.validate==="digits" && !/^[0-9]+$/.test(v)) return `"${f.label}" solo puede contener números.`;
+      if(f.validate==="alnum" && !/^[A-Za-z0-9]+$/.test(v)) return `"${f.label}" solo puede contener letras y números.`;
       if(f.type==="number" && v!=="" && !/^[0-9]+$/.test(String(v))) return `"${f.label}" solo puede contener números.`;
     }
     return null;
@@ -2133,6 +2152,31 @@ function App(){
     catch(e){ console.error(e); showSt("No se pudo eliminar la base de datos.",true); }
   }
 
+  // Recorre todos los estudiantes ya guardados y corrige mayúsculas en nombres/documentos
+  // y valores de listas desplegables (Ruta, Transportador, etc.) que hayan quedado con
+  // distinta capitalización por importaciones anteriores. Solo reescribe los que cambian.
+  async function hNormalize(){
+    if(!window.confirm("Esto revisará todos los estudiantes y corregirá mayúsculas y valores de listas (rutas, transportador, etc.) desactualizados. ¿Continuar?")) return;
+    setImporting(true);
+    try{
+      const changed=[];
+      students.forEach(s=>{
+        let diff=false;const norm={...s};
+        FIELD_DEFS.forEach(f=>{
+          const cur=s[f.id];
+          if(cur==null||cur==="") return;
+          const nv=normalizeFieldValue(f,cur);
+          if(nv!==cur){norm[f.id]=nv;diff=true;}
+        });
+        if(diff) changed.push(norm);
+      });
+      if(!changed.length){showSt("Todos los registros ya estaban normalizados.");setImporting(false);return;}
+      await studentsStorage.saveMany(changed);
+      showSt(`${changed.length} registro(s) corregido(s) (mayúsculas y listas).`);
+    }catch(e){ console.error(e); showSt("No se pudo normalizar la base de datos.",true); }
+    setImporting(false);
+  }
+
   function hImport(e){
     const file=e.target.files?.[0];if(!file)return;setImporting(true);
     const reader=new FileReader();
@@ -2143,7 +2187,7 @@ function App(){
       const existing=new Set(students.filter(s=>(s.NRO_DOCUMENTO||"").trim()).map(s=>keyOf(s.TIPO_DOCUMENTO,s.NRO_DOCUMENTO,s.ANNO_INF)));
       const seen=new Set();const imported=[],rejected=[];
       rows.forEach((row,idx)=>{
-        const obj=emptyStudent();Object.keys(row).forEach(k=>{const fid=FIELD_KEY_MAP[normalizeKey(k)];if(fid)obj[fid]=String(row[k]??"").trim();});if(!obj.ESTADO)obj.ESTADO="MATRICULADO";
+        const obj=emptyStudent();Object.keys(row).forEach(k=>{const fid=FIELD_KEY_MAP[normalizeKey(k)];if(!fid)return;const field=FIELD_DEFS.find(f=>f.id===fid);obj[fid]=field?normalizeFieldValue(field,row[k]):String(row[k]??"").trim();});if(!obj.ESTADO)obj.ESTADO="MATRICULADO";
         const doc=(obj.NRO_DOCUMENTO||"").trim();
         const nombre=[obj.NOMBRE1,obj.NOMBRE2,obj.APELLIDO1,obj.APELLIDO2].filter(Boolean).join(" ")||`Fila ${idx+2}`;
         if(!doc&&!obj.NOMBRE1&&!obj.APELLIDO1){rejected.push({nombre,doc:"—",razon:"Fila sin documento ni nombre"});return;}
@@ -2183,8 +2227,8 @@ function App(){
       &&(!filterRiesgo||(filterRiesgo==="alto"&&rc>=3)||(filterRiesgo==="medio"&&rc>=1&&rc<3)||(filterRiesgo==="bajo"&&rc===0))
       &&(!filterFactor||s[filterFactor]==="S")
       &&(!filterEstado||(s.ESTADO||"MATRICULADO")===filterEstado)
-      &&(!filterRuta||(s.RUTA||"Sin Ruta")===filterRuta)
-      &&(!filterTransportador||(s.TRANSPORTADOR||"No Aplica")===filterTransportador);
+      &&(!filterRuta||matchVal(RUTA_OPTS,s.RUTA||"Sin Ruta")===filterRuta)
+      &&(!filterTransportador||matchVal(TRANSPORTADOR_OPTS,s.TRANSPORTADOR||"No Aplica")===filterTransportador);
   });
   const anios=Array.from(new Set(students.map(s=>s.ANNO_INF).filter(Boolean))).sort((a,b)=>Number(b)-Number(a));
   const grados=Array.from(new Set(students.map(s=>s.GRADO).filter(Boolean))).sort((a,b)=>GRADO_OPTS.findIndex(g=>g.value===a)-GRADO_OPTS.findIndex(g=>g.value===b));
@@ -2231,6 +2275,7 @@ function App(){
             isAdmin&&h('button',{onClick:()=>{setShowGrados(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🎓 Grados y Tutores"),
             isAdmin&&h('button',{onClick:()=>{setShowAuditoria(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🕒 Auditoría"),
             isAdmin&&h('button',{onClick:()=>{setShowCompletitud(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"📊 Completitud de Datos"),
+            isAdmin&&h('button',{onClick:()=>{hNormalize();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🧹 Normalizar Datos Existentes"),
             isAdmin&&h('div',{className:"border-t border-slate-100 my-1"}),
             isAdmin&&h('button',{onClick:()=>{setConfirmClearDB(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50 flex items-center gap-2"},h(Icons.Trash),"Borrar Base de Datos")
           )
