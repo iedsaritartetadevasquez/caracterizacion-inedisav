@@ -479,12 +479,12 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-portal-estudiante-v5";
+const APP_VERSION = "2026-08-10-portal-estudiante-v6";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar",estudiante:"Estudiante"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900",estudiante:"bg-rose-200 text-rose-900"};
 const ROLE_TAG    = {admin:"bg-indigo-100 text-indigo-700",rector:"bg-purple-100 text-purple-700",coordinador:"bg-amber-100 text-amber-700",orientacion:"bg-teal-100 text-teal-700",docente:"bg-emerald-100 text-emerald-700",auxiliar:"bg-sky-100 text-sky-700"};
-const MANAGED_ROLES=["admin","rector","coordinador","orientacion","docente","auxiliar"];
+const MANAGED_ROLES=["admin","rector","coordinador","orientacion","docente","auxiliar","estudiante"];
 
 const II={lema:'"INEDISAV CONSTRUYENDO CALIDAD"',licencia:"Licencia de funcionamiento 000879 mayo 29 de 2001",jornada:"Jornada Única 04271 julio 14 de 2016 - 04110 abril 5 de 2018",dane:"108001003068",nit:"802006858-9",email:"iedsaritartetadevasquez.edu.co",web:"iedsaridartetadevasquezblog.wordpress.com",dir:"Carrera 18 No 47-72 Barrio El Carmen",ciudad:"Barranquilla - Atlántico - Colombia"};
 const SHIELD_URL="https://iedsaridartetadevasquezblog.wordpress.com/wp-content/uploads/2023/08/cropped-ecudo-actualizado-1.png";
@@ -964,6 +964,7 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
 
   async function addUser(){
     if(!form.nombre.trim()||!form.email.trim()){say("Completa nombre y correo.",true);return;}
+    if(form.role==="estudiante"){say('Para estudiantes usa Herramientas → "Crear Usuarios de Estudiantes" (así queda vinculada a su ficha automáticamente).',true);return;}
     setCreating(true);
     try{
       await usersStorage.createUser(form);
