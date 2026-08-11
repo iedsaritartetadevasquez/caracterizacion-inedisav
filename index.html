@@ -108,6 +108,50 @@ const usersStorage = {
   }
 };
 
+// Crea cuentas de acceso para estudiantes en lote: usuario = inicial del primer nombre +
+// primer apellido + últimos 4 dígitos del documento + "e", contraseña = número de documento.
+// Usa una app secundaria de Firebase para no cerrar la sesión del admin. Salta a quienes
+// ya tengan cuenta (AUTH_UID) o cuyo documento tenga menos de 6 caracteres (mínimo de Firebase).
+async function crearUsuariosEstudiantes(lista){
+  const resultado={creados:0,saltados:0,errores:[]};
+  if(!db||!auth) return resultado;
+  const pendientes=lista.filter(s=>!s.AUTH_UID && s.NOMBRE1 && s.APELLIDO1 && s.NRO_DOCUMENTO);
+  resultado.saltados = lista.length - pendientes.length;
+  if(!pendientes.length) return resultado;
+
+  // Trae los correos ya registrados para evitar colisiones de usuario
+  const usadosSnap = await db.collection(USERS_COLLECTION).get();
+  const usados = new Set(usadosSnap.docs.map(d=>(d.data().email||"").toLowerCase()));
+
+  const secondaryName='secondary-'+Date.now();
+  const secondaryApp=firebase.initializeApp(FIREBASE_CONFIG, secondaryName);
+  try{
+    for(const s of pendientes){
+      const doc=String(s.NRO_DOCUMENTO||"").replace(/[^0-9A-Za-z]/g,"");
+      if(doc.length<6){ resultado.errores.push({estudiante:`${s.NOMBRE1} ${s.APELLIDO1}`,motivo:"Documento con menos de 6 caracteres"}); continue; }
+      const email=buildStudentEmail(s);
+      if(usados.has(email.toLowerCase())){ resultado.errores.push({estudiante:`${s.NOMBRE1} ${s.APELLIDO1}`,motivo:`Usuario duplicado (${email})`}); continue; }
+      try{
+        const cred=await secondaryApp.auth().createUserWithEmailAndPassword(email, doc);
+        const uid=cred.user.uid;
+        await db.collection(USERS_COLLECTION).doc(uid).set({
+          nombre:`${s.NOMBRE1} ${s.APELLIDO1}`.trim(), email, role:"estudiante", activo:true,
+          estudianteId:s._id, documento:doc, creadoEn:new Date().toISOString()
+        });
+        await studentsStorage.updateFields(s._id,{AUTH_UID:uid, AUTH_EMAIL:email, AUTH_CREADO_EN:new Date().toISOString()});
+        usados.add(email.toLowerCase());
+        resultado.creados++;
+      }catch(e){
+        resultado.errores.push({estudiante:`${s.NOMBRE1} ${s.APELLIDO1}`,motivo:e.message||String(e)});
+      }
+    }
+    await secondaryApp.auth().signOut();
+  } finally {
+    await secondaryApp.delete();
+  }
+  return resultado;
+}
+
 // ═══════════════════════════════════════════
 // ALMACENAMIENTO DE ESTUDIANTES (1 documento por estudiante)
 // Antes: TODOS los estudiantes vivían en un único documento
@@ -205,6 +249,19 @@ const studentsStorage = {
         await batch.commit();
       }
     } else { _writeFallback([]); }
+  },
+  // Se suscribe SOLO al estudiante cuya cuenta (AUTH_UID) coincide con el usuario autenticado.
+  // Usado por el portal de estudiantes: nunca trae la colección completa.
+  subscribeOwn(uid, onData, onError){
+    if(!db){ onData(null); return ()=>{}; }
+    return db.collection(STUDENTS_COLLECTION).where("AUTH_UID","==",uid).limit(1).onSnapshot(
+      snap => onData(snap.empty ? null : {...snap.docs[0].data(), _id:snap.docs[0].id}),
+      err => { console.error('Error cargando ficha del estudiante:', err); onError && onError(err); }
+    );
+  },
+  // Actualiza solo los campos indicados (usado por el portal de estudiantes)
+  async updateFields(id, patch){
+    if(db){ await db.collection(STUDENTS_COLLECTION).doc(id).update(patch); }
   }
 };
 
@@ -422,10 +479,10 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-mayusculas-v4";
+const APP_VERSION = "2026-08-10-portal-estudiante-v5";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
-const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar"};
-const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900"};
+const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar",estudiante:"Estudiante"};
+const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900",estudiante:"bg-rose-200 text-rose-900"};
 const ROLE_TAG    = {admin:"bg-indigo-100 text-indigo-700",rector:"bg-purple-100 text-purple-700",coordinador:"bg-amber-100 text-amber-700",orientacion:"bg-teal-100 text-teal-700",docente:"bg-emerald-100 text-emerald-700",auxiliar:"bg-sky-100 text-sky-700"};
 const MANAGED_ROLES=["admin","rector","coordinador","orientacion","docente","auxiliar"];
 
@@ -564,6 +621,32 @@ const FIELD_DEFS=[
 ];
 
 const RISK_FIELDS=["EMBARAZO","TRABAJA","MAT_PAT_TEMPRANA_EDAD","VICTIMA_DISCRIMINACION","VICTIMA_AGRESIONES","RET_EST_SIN_TERMINAR_ANO_ESC","REPETIDA_ANO","REPETIDA_GRADO_ACTUAL","DIFICULTADES_APRENDIZAJE"];
+
+// ═══════════════════════════════════════════
+// PORTAL DE ESTUDIANTES (rol "estudiante")
+// El estudiante solo puede ver/editar SU PROPIA ficha, y solo las secciones
+// de caracterización (no identidad/administrativo ni historial institucional).
+// ═══════════════════════════════════════════
+const STUDENT_EMAIL_DOMAIN = "estudiante.inedisav.edu.co";
+const STUDENT_EDITABLE_SECTION_IDS = ["personal","vivienda","familiar"];
+// Campos que, aunque viven en una sección editable, los diligencia el colegio (no el estudiante):
+// asistencia de la familia a reuniones/entrega de boletines.
+const STUDENT_EXCLUDED_FIELD_IDS = ["ASISTE_REU_DIF_BOLETIN","ASISTE_ENTREGA_INFORMES"];
+const STUDENT_EDITABLE_FIELD_IDS = FIELD_DEFS.filter(f=>STUDENT_EDITABLE_SECTION_IDS.includes(f.section) && !f.comisionField && !f.adminOnly && !STUDENT_EXCLUDED_FIELD_IDS.includes(f.id)).map(f=>f.id);
+
+// Quita tildes y cualquier caracter que no sea letra, para usar en el usuario/correo
+function _soloLetras(s){ return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^A-Za-z]/g,"").toLowerCase(); }
+
+// inicial del primer nombre + primer apellido + últimos 4 dígitos del documento + "e"
+function buildStudentUsername(s){
+  const inicial=_soloLetras(s.NOMBRE1).slice(0,1);
+  const apellido=_soloLetras(s.APELLIDO1);
+  const doc=String(s.NRO_DOCUMENTO||"").replace(/[^0-9A-Za-z]/g,"");
+  const ult4=doc.slice(-4);
+  return `${inicial}${apellido}${ult4}e`;
+}
+function buildStudentEmail(s){ return `${buildStudentUsername(s)}@${STUDENT_EMAIL_DOMAIN}`; }
+
 
 function emptyStudent(){const o={};FIELD_DEFS.forEach(f=>{o[f.id]="";});o._id=null;o.ESTADO="MATRICULADO";return o;}
 function riskCount(s){if(s.ESTADO==="RETIRADO")return -1;return RISK_FIELDS.filter(f=>s[f]==="S").length;}
@@ -2007,6 +2090,88 @@ function ReportsView({students}){
 }
 
 // ═══════════════════════════════════════════
+// PORTAL DE ESTUDIANTES: el estudiante ve/edita solo SU ficha,
+// y solo los campos de caracterización (no identidad ni historial institucional).
+// ═══════════════════════════════════════════
+function EstudiantePortal({session,onLogout}){
+  const [myStudent,setMyStudent]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [formData,setFormData]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const [msg,setMsg]=useState(""); const [msgErr,setMsgErr]=useState(false);
+
+  useEffect(()=>{
+    if(!session?.uid){ setLoading(false); return; }
+    const unsub=studentsStorage.subscribeOwn(session.uid,
+      (doc)=>{ setMyStudent(doc); setFormData(doc?{...doc}:null); setLoading(false); },
+      ()=>{ setLoading(false); setMsg("No se pudo cargar tu información."); setMsgErr(true); }
+    );
+    return ()=>unsub();
+  },[session?.uid]);
+
+  function say(t,err=false){ setMsg(t); setMsgErr(err); setTimeout(()=>setMsg(""),4000); }
+  function hChange(fid,val){ setFormData(p=>({...p,[fid]:val})); }
+
+  async function hSave(){
+    if(!myStudent) return;
+    for(const fid of STUDENT_EDITABLE_FIELD_IDS){
+      const f=FIELD_DEFS.find(x=>x.id===fid); const v=formData[fid];
+      if(!v) continue;
+      if(f.validate==="alpha" && !/^[A-Za-zÁÉÍÓÚÑÜáéíóúñü\s]+$/.test(v)){say(`"${f.label}" solo puede contener letras.`,true);return;}
+      if(f.validate==="digits" && !/^[0-9]+$/.test(v)){say(`"${f.label}" solo puede contener números.`,true);return;}
+    }
+    setSaving(true);
+    try{
+      const patch={}; STUDENT_EDITABLE_FIELD_IDS.forEach(fid=>{patch[fid]=formData[fid]||"";});
+      patch.ACTUALIZADO_POR_ESTUDIANTE_EN=new Date().toISOString();
+      await studentsStorage.updateFields(myStudent._id,patch);
+      registrarAuditoria(session.nombre||session.email, "estudiante", "ESTUDIANTE_ACTUALIZO_PERFIL", `${myStudent.NOMBRE1||""} ${myStudent.APELLIDO1||""}`);
+      say("Información actualizada. ¡Gracias!");
+    }catch(e){ console.error(e); say("No se pudo guardar. Intenta de nuevo.",true); }
+    setSaving(false);
+  }
+
+  if(loading) return h('div',{className:"min-h-screen flex items-center justify-center text-indigo-600"},h(Icons.Spin));
+  if(!myStudent) return h('div',{className:"min-h-screen flex items-center justify-center flex-col gap-4 text-center px-4"},
+    h('p',{className:"text-slate-600"},"No encontramos una ficha asociada a tu cuenta. Habla con la coordinación del colegio."),
+    h('button',{onClick:onLogout,className:"px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm"},"Salir")
+  );
+
+  const nombreCompleto=[myStudent.NOMBRE1,myStudent.NOMBRE2,myStudent.APELLIDO1,myStudent.APELLIDO2].filter(Boolean).join(" ");
+  const gradoLabel=(GRADO_OPTS.find(g=>g.value===myStudent.GRADO)?.label||myStudent.GRADO||"").split(" - ")[1]||myStudent.GRADO;
+
+  return h('div',{className:"min-h-screen bg-slate-50"},
+    h('div',{className:"bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 md:px-6 py-4 flex items-center justify-between"},
+      h('div',null,
+        h('div',{className:"font-bold text-lg"},"Mi Información — INEDISAV"),
+        h('div',{className:"text-sm text-white/80"},`${nombreCompleto} · ${gradoLabel} ${myStudent.GRUPO||""}`.trim())
+      ),
+      h('button',{onClick:onLogout,className:"px-3 py-1.5 rounded-lg text-sm font-medium bg-white/10 hover:bg-white/20 border border-white/30"},"Salir")
+    ),
+    h('div',{className:"max-w-3xl mx-auto p-4 md:p-6 space-y-4"},
+      h('div',{className:"bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-3 text-sm"},
+        "Revisa y actualiza tu información cada año. Los datos de matrícula (documento, grado, grupo, estado) los maneja la coordinación del colegio y no se pueden editar aquí."
+      ),
+      msg&&h('div',{className:`rounded-lg px-4 py-3 text-sm ${msgErr?"bg-rose-50 text-rose-700 border border-rose-200":"bg-emerald-50 text-emerald-700 border border-emerald-200"}`},msg),
+      STUDENT_EDITABLE_SECTION_IDS.map(secId=>{
+        const secLabel=SECTIONS.find(s=>s.id===secId)?.label||secId;
+        const camposSec=FIELD_DEFS.filter(f=>f.section===secId && !STUDENT_EXCLUDED_FIELD_IDS.includes(f.id));
+        if(!camposSec.length) return null;
+        return h('div',{key:secId,className:"bg-white rounded-xl border border-slate-200 p-4 md:p-5"},
+          h('h3',{className:"font-semibold text-slate-800 mb-3"},secLabel),
+          h('div',{className:"grid grid-cols-1 md:grid-cols-2 gap-3"},
+            camposSec.map(f=>h(FieldRenderer,{key:f.id,field:f,value:formData[f.id],onChange:v=>hChange(f.id,v),parentValue:formData.RAZON_DESERCION,disabled:!!(f.comisionField||f.adminOnly)}))
+          )
+        );
+      }),
+      h('div',{className:"flex justify-end pb-8"},
+        h('button',{onClick:hSave,disabled:saving,className:"px-6 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"},saving?"Guardando...":"Guardar cambios")
+      )
+    )
+  );
+}
+
+// ═══════════════════════════════════════════
 // APP PRINCIPAL
 // ═══════════════════════════════════════════
 function App(){
@@ -2065,7 +2230,7 @@ function App(){
 
   // Solo se conecta a los datos de estudiantes cuando hay una sesión válida
   useEffect(()=>{
-    if(!session){ setStudents([]); return; }
+    if(!session || session.role==="estudiante"){ setStudents([]); return; }
     let unsub=()=>{};
     (async()=>{
       setLoading(true);
@@ -2080,6 +2245,7 @@ function App(){
 
   if(!authChecked) return h('div',{className:"min-h-screen flex items-center justify-center text-indigo-600"},h(Icons.Spin));
   if(!session)return h(LoginScreen,{onLogin:setSession});
+  if(session.role==="estudiante") return h(EstudiantePortal,{session,onLogout:()=>{auth&&auth.signOut();setSession(null);}});
   const role=session.role;
   const isAdmin=role==="admin";
   const canManageUsers=role==="admin"||role==="rector";
@@ -2203,6 +2369,23 @@ function App(){
     setImporting(false);
   }
 
+  // Crea cuentas de estudiante para la lista actualmente filtrada (año/grado/grupo/estado),
+  // así el admin puede acotar el alcance en vez de procesar los 700+ de una vez.
+  async function hCrearUsuariosEstudiantes(){
+    const candidatos=filtered.filter(s=>s.ESTADO!=="RETIRADO");
+    const sinCuenta=candidatos.filter(s=>!s.AUTH_UID).length;
+    if(!sinCuenta){showSt("Todos los estudiantes de este filtro ya tienen cuenta.");return;}
+    if(!window.confirm(`Se crearán cuentas para ${sinCuenta} estudiante(s) sin cuenta (según el filtro actual: año/grado/grupo/estado). El usuario será inicial+apellido+documento+"e" y la contraseña el número de documento. Puede tardar unos minutos. ¿Continuar?`)) return;
+    setImporting(true);
+    try{
+      const r=await crearUsuariosEstudiantes(candidatos);
+      let msg=`${r.creados} cuenta(s) creada(s), ${r.saltados} ya tenían cuenta o datos incompletos.`;
+      if(r.errores.length){ msg+=` ${r.errores.length} con error (ver consola).`; console.warn("Errores creando usuarios de estudiante:", r.errores); }
+      showSt(msg, r.errores.length>0 && r.creados===0);
+    }catch(e){ console.error(e); showSt("No se pudo completar la creación de cuentas.",true); }
+    setImporting(false);
+  }
+
   function hImport(e){
     const file=e.target.files?.[0];if(!file)return;setImporting(true);
     const reader=new FileReader();
@@ -2303,6 +2486,7 @@ function App(){
             isAdmin&&h('button',{onClick:()=>{setShowAuditoria(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🕒 Auditoría"),
             isAdmin&&h('button',{onClick:()=>{setShowCompletitud(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"📊 Completitud de Datos"),
             isAdmin&&h('button',{onClick:()=>{hNormalize();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🧹 Normalizar Datos Existentes"),
+            isAdmin&&h('button',{onClick:()=>{hCrearUsuariosEstudiantes();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🎓 Crear Usuarios de Estudiantes"),
             isAdmin&&h('div',{className:"border-t border-slate-100 my-1"}),
             isAdmin&&h('button',{onClick:()=>{setConfirmClearDB(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50 flex items-center gap-2"},h(Icons.Trash),"Borrar Base de Datos")
           )
