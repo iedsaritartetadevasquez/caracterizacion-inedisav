@@ -422,7 +422,7 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-diagnostico-v3";
+const APP_VERSION = "2026-08-10-mayusculas-v4";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900"};
@@ -439,9 +439,9 @@ function lfHtml(){return `<div style="margin-top:24px;border-top:1px solid #cbd5
 const ESTADO_OPTS=[{value:"MATRICULADO",label:"Matriculado"},{value:"RETIRADO",label:"Retirado"},{value:"REPROBADO",label:"Reprobado"},{value:"PROMOVIDO",label:"Promovido"}];
 const GENERO_OPTS=[{value:"F",label:"F - Femenino"},{value:"M",label:"M - Masculino"}];
 const OBSERVACION_OPTS=[{value:"",label:"Ninguna"},{value:"COMPROMISO CONVIVENCIAL",label:"Compromiso Convivencial"},{value:"COMPROMISO ACADEMICO",label:"Compromiso Académico"}];
-const ESTADO_SIMAT_OPTS=[{value:"",label:"— Seleccione —"},{value:"Registrado",label:"Registrado"},{value:"No Liberado",label:"No Liberado"},{value:"Sin Matricular",label:"Sin Matricular"}];
-const RUTA_OPTS=[{value:"Sin Ruta",label:"Sin Ruta"},{value:"Con Ruta",label:"Con Ruta"}];
-const TRANSPORTADOR_OPTS=[{value:"No Aplica",label:"No Aplica"},{value:"Ana",label:"Ana"},{value:"Rosa",label:"Rosa"},{value:"Michell",label:"Michell"},{value:"Bosque",label:"Bosque"}];
+const ESTADO_SIMAT_OPTS=[{value:"",label:"— Seleccione —"},{value:"REGISTRADO",label:"Registrado"},{value:"NO LIBERADO",label:"No Liberado"},{value:"SIN MATRICULAR",label:"Sin Matricular"}];
+const RUTA_OPTS=[{value:"SIN RUTA",label:"Sin Ruta"},{value:"CON RUTA",label:"Con Ruta"}];
+const TRANSPORTADOR_OPTS=[{value:"NO APLICA",label:"No Aplica"},{value:"ANA",label:"Ana"},{value:"ROSA",label:"Rosa"},{value:"MICHELL",label:"Michell"},{value:"BOSQUE",label:"Bosque"}];
 
 // Quién puede llevar el ESTADO a cada valor (matrícula = administrativo, notas = comisión académica)
 const ESTADO_PERMISOS={
@@ -457,7 +457,7 @@ const GRADO_OPTS=[{value:"-2",label:"-2 - Jardín"},{value:"0",label:"0 - Transi
 const GRUPO_OPTS=[{value:"",label:"— Sin grupo (grado único) —"},{value:"A",label:"A"},{value:"B",label:"B"},{value:"C",label:"C"},{value:"D",label:"D"},{value:"E",label:"E"},{value:"F",label:"F"}];
 
 // ── Información personal del staff ──
-const SEXO_OPTS=[{value:"Femenino",label:"Femenino"},{value:"Masculino",label:"Masculino"}];
+const SEXO_OPTS=[{value:"FEMENINO",label:"Femenino"},{value:"MASCULINO",label:"Masculino"}];
 const TIPO_PERSONAL_OPTS=[{value:"DOCENTE DE AULA",label:"Docente de Aula"},{value:"DIRECTIVO DOCENTE",label:"Directivo Docente"},{value:"ORIENTADORA",label:"Orientadora"},{value:"DOCENTE ORIENTADORES",label:"Docente Orientador"},{value:"ADMINISTRATIVO",label:"Administrativo"}];
 const NIVEL_ACAD_PERSONAL_OPTS=[{value:"",label:"— Seleccione —"},{value:"PREESCOLAR",label:"Preescolar"},{value:"PRIMARIA",label:"Primaria"},{value:"SECUNDARIA",label:"Secundaria"},{value:"MEDIA",label:"Media"},{value:"NO APLICA",label:"No aplica"}];
 const AREA_EDUCATIVA_OPTS=[{value:"",label:"— Seleccione —"},{value:"TODAS LAS AREAS",label:"Todas las áreas"},{value:"MATEMATICAS",label:"Matemáticas"},{value:"HUMANIDADES Y LENGUA CASTELLANA",label:"Humanidades y Lengua Castellana"},{value:"IDIOMAS EXTRANGEROS",label:"Idiomas Extranjeros"},{value:"CIENCIAS NATURALES Y EDUCACION AMBIENTAL",label:"Ciencias Naturales y Educación Ambiental"},{value:"CIENCIAS SOCIALES, HISTORIA, GEOGRAFIA,CONSTITUCION POLITICA Y DEMOCRACIA",label:"Ciencias Sociales, Historia, Geografía, Constitución"},{value:"EDUCACION FISICA, RECREACION Y DEPORTES",label:"Educación Física, Recreación y Deportes"},{value:"EDUCACION ARTISTICA Y CULTURAL",label:"Educación Artística y Cultural"},{value:"EDUCACION RELIGIOSA",label:"Educación Religiosa"},{value:"EDUCACION ETICA Y EN VALORES HUMANOS",label:"Educación Ética y en Valores Humanos"},{value:"TECNOLOGIA INFORMATICA",label:"Tecnología Informática"},{value:"DIMENSIONES (EXCLUSIVO PARA PREESCOLAR)",label:"Dimensiones (exclusivo Preescolar)"}];
@@ -1939,8 +1939,8 @@ function ReportsView({students}){
   const razonD=countBy(data.filter(s=>s.ESTADO==="RETIRADO"),"RAZON_DESERCION").map(d=>({...d,name:rL(d.name)}));
   const asigD=countMulti(data,["ASIG_PERIODO_1","ASIG_PERIODO_2"]).map(d=>({...d,name:aL(d.name)})).slice(0,9);
   const nivelD=countBy(data,"NIVEL_EDUCATIVO").map(d=>({...d,name:nL(d.name)})).sort((a,b)=>b.total-a.total);
-  const rutaD=countBy(data,"RUTA").map(d=>({...d,name:d.name||"Sin Ruta"})).sort((a,b)=>b.total-a.total);
-  const transpD=countBy(data,"TRANSPORTADOR").map(d=>({...d,name:d.name||"No Aplica"})).sort((a,b)=>b.total-a.total);
+  const rutaD=countBy(data,"RUTA").map(d=>({...d,name:d.name||"SIN RUTA"})).sort((a,b)=>b.total-a.total);
+  const transpD=countBy(data,"TRANSPORTADOR").map(d=>({...d,name:d.name||"NO APLICA"})).sort((a,b)=>b.total-a.total);
   const genD=[{name:"Femenino",total:data.filter(s=>s.GENERO==="F").length},{name:"Masculino",total:data.filter(s=>s.GENERO==="M").length}].filter(d=>d.total>0);
   const estD=[
     {name:"Matriculados",total:data.filter(s=>(s.ESTADO||"MATRICULADO")==="MATRICULADO").length},
@@ -2162,7 +2162,7 @@ function App(){
   // y valores de listas desplegables (Ruta, Transportador, etc.) que hayan quedado con
   // distinta capitalización por importaciones anteriores. Solo reescribe los que cambian.
   async function hNormalize(){
-    if(!window.confirm("Esto revisará todos los estudiantes y corregirá mayúsculas y valores de listas (rutas, transportador, etc.) desactualizados. ¿Continuar?")) return;
+    if(!window.confirm("Esto revisará todos los estudiantes y el personal, y corregirá mayúsculas y valores de listas (rutas, transportador, sexo, etc.) desactualizados. ¿Continuar?")) return;
     setImporting(true);
     try{
       const changed=[];
@@ -2170,21 +2170,35 @@ function App(){
         let diff=false;const norm={...s};
         FIELD_DEFS.forEach(f=>{
           const cur=s[f.id];
-          if(["RUTA","TRANSPORTADOR","ESTADO_SIMAT"].includes(f.id)){
-            console.log(`[Normalizar][${f.id}] estudiante="${s.NOMBRE1||""} ${s.APELLIDO1||""}" _id=${s._id} valorActual=${JSON.stringify(cur)} tipo=${typeof cur}`);
-          }
           if(cur==null||cur==="") return;
           const nv=normalizeFieldValue(f,cur);
-          if(["RUTA","TRANSPORTADOR","ESTADO_SIMAT"].includes(f.id)){
-            console.log(`[Normalizar][${f.id}]   -> propuesto=${JSON.stringify(nv)} cambia=${nv!==cur}`);
-          }
           if(nv!==cur){norm[f.id]=nv;diff=true;}
         });
         if(diff) changed.push(norm);
       });
-      if(!changed.length){showSt("Todos los registros ya estaban normalizados.");setImporting(false);return;}
-      await studentsStorage.saveMany(changed);
-      showSt(`${changed.length} registro(s) corregido(s) (mayúsculas y listas).`);
+      if(changed.length) await studentsStorage.saveMany(changed);
+
+      // También corrige el personal (ej. campo Sexo) usando la misma lógica.
+      let changedPersonal=0;
+      if(db){
+        const snap=await db.collection(PERSONAL_COLLECTION).get();
+        const personChanged=[];
+        snap.docs.forEach(docSnap=>{
+          const p={...docSnap.data(),_id:docSnap.id};
+          let diff=false;const norm={...p};
+          PERSONAL_FIELD_DEFS.forEach(f=>{
+            const cur=p[f.id];
+            if(cur==null||cur==="") return;
+            const nv=normalizeFieldValue(f,cur);
+            if(nv!==cur){norm[f.id]=nv;diff=true;}
+          });
+          if(diff) personChanged.push(norm);
+        });
+        if(personChanged.length){ await personalStorage.saveMany(personChanged); changedPersonal=personChanged.length; }
+      }
+
+      if(!changed.length && !changedPersonal){showSt("Todos los registros ya estaban normalizados.");setImporting(false);return;}
+      showSt(`${changed.length} estudiante(s) y ${changedPersonal} funcionario(s) corregido(s) (mayúsculas y listas).`);
     }catch(e){ console.error(e); showSt("No se pudo normalizar la base de datos.",true); }
     setImporting(false);
   }
@@ -2239,8 +2253,8 @@ function App(){
       &&(!filterRiesgo||(filterRiesgo==="alto"&&rc>=3)||(filterRiesgo==="medio"&&rc>=1&&rc<3)||(filterRiesgo==="bajo"&&rc===0))
       &&(!filterFactor||s[filterFactor]==="S")
       &&(!filterEstado||(s.ESTADO||"MATRICULADO")===filterEstado)
-      &&(!filterRuta||matchVal(RUTA_OPTS,s.RUTA||"Sin Ruta")===filterRuta)
-      &&(!filterTransportador||matchVal(TRANSPORTADOR_OPTS,s.TRANSPORTADOR||"No Aplica")===filterTransportador);
+      &&(!filterRuta||matchVal(RUTA_OPTS,s.RUTA||"SIN RUTA")===filterRuta)
+      &&(!filterTransportador||matchVal(TRANSPORTADOR_OPTS,s.TRANSPORTADOR||"NO APLICA")===filterTransportador);
   });
   const anios=Array.from(new Set(students.map(s=>s.ANNO_INF).filter(Boolean))).sort((a,b)=>Number(b)-Number(a));
   const grados=Array.from(new Set(students.map(s=>s.GRADO).filter(Boolean))).sort((a,b)=>GRADO_OPTS.findIndex(g=>g.value===a)-GRADO_OPTS.findIndex(g=>g.value===b));
