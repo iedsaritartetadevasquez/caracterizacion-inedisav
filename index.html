@@ -105,6 +105,12 @@ const usersStorage = {
   },
   async resendReset(email){
     await auth.sendPasswordResetEmail(email.trim().toLowerCase());
+  },
+  // Borra el perfil (documento en /usuarios) de una cuenta de estudiante para poder
+  // volver a crearla. NO borra la cuenta de Firebase Auth en sí (eso requiere borrarla
+  // a mano en la consola de Firebase, ver instrucciones en el botón "Restablecer cuenta").
+  async deleteProfile(uid){
+    await db.collection(USERS_COLLECTION).doc(uid).delete();
   }
 };
 
@@ -479,7 +485,7 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-portal-estudiante-v9";
+const APP_VERSION = "2026-08-10-portal-estudiante-v10";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar",estudiante:"Estudiante"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900",estudiante:"bg-rose-200 text-rose-900"};
@@ -998,6 +1004,22 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
     try{ await usersStorage.resendReset(u.email); registrarAuditoria(usuario,rolActual,"REENVIAR_CLAVE",u.email); say(`Correo de recuperación reenviado a ${u.email}.`); }
     catch(e){ console.error(e); say("No se pudo reenviar el correo.",true); }
   }
+  async function resetStudentAccount(u){
+    if(!window.confirm(
+      `Esto va a desvincular la cuenta de "${u.nombre}" (${u.email}) para poder crearla de nuevo.\n\n`+
+      `IMPORTANTE - paso manual obligatorio antes de recrearla:\n`+
+      `1. Ve a Firebase Console → Authentication → Users\n`+
+      `2. Busca el correo: ${u.email}\n`+
+      `3. Bórralo ahí (⋮ → Delete account)\n\n`+
+      `Después de eso, ve a Herramientas → "Crear Usuarios de Estudiantes" en la pantalla de Estudiantes para generarle una cuenta nueva (mismo usuario, contraseña = su documento).\n\n¿Continuar?`
+    )) return;
+    try{
+      if(u.estudianteId) await studentsStorage.updateFields(u.estudianteId,{AUTH_UID:"",AUTH_EMAIL:""});
+      await usersStorage.deleteProfile(u.uid);
+      registrarAuditoria(usuario,rolActual,"RESTABLECER_CUENTA_ESTUDIANTE",u.email);
+      say(`Listo. Ahora borra "${u.email}" en Firebase Console → Authentication, y luego créala de nuevo desde Herramientas → Crear Usuarios de Estudiantes.`);
+    }catch(e){ console.error(e); say("No se pudo desvincular la cuenta.",true); }
+  }
 
   return h('div',{className:"fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4 py-6 overflow-y-auto"},
     h('div',{className:"bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 my-auto max-h-[90vh] flex flex-col"},
@@ -1041,7 +1063,9 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
             h('td',{className:"px-3 py-2"},h('span',{className:`px-2 py-0.5 rounded-full text-xs font-medium ${u.activo?"bg-emerald-100 text-emerald-700":"bg-slate-200 text-slate-500"}`},u.activo?"Activo":"Inactivo")),
             h('td',{className:"px-3 py-2"},h('div',{className:"flex gap-2"},
               h('button',{onClick:()=>toggleActive(u),className:"text-xs px-2 py-1 border border-slate-200 rounded hover:bg-slate-50"},u.activo?"Desactivar":"Activar"),
-              h('button',{onClick:()=>resend(u),className:"text-xs px-2 py-1 border border-slate-200 rounded hover:bg-slate-50"},"Reenviar clave")
+              u.role==="estudiante"
+                ? h('button',{onClick:()=>resetStudentAccount(u),className:"text-xs px-2 py-1 border border-amber-200 text-amber-700 rounded hover:bg-amber-50"},"Restablecer cuenta")
+                : h('button',{onClick:()=>resend(u),className:"text-xs px-2 py-1 border border-slate-200 rounded hover:bg-slate-50"},"Reenviar clave")
             ))
           )))
         )
@@ -2412,6 +2436,27 @@ function App(){
   }
 
   function hExport(){if(!students.length){showSt("No hay registros.",true);return;}const h2=FIELD_DEFS.map(f=>f.id);const rows=students.map(s=>{const r={};h2.forEach(k=>{r[k]=s[k]||"";});return r;});const ws=XLSX.utils.json_to_sheet(rows,{header:h2});const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Estudiantes");XLSX.writeFile(wb,`estudiantes_${new Date().toISOString().slice(0,10)}.xlsx`);showSt("Excel exportado.");}
+
+  // Reporte de usuario/contraseña para entregar impreso. La contraseña siempre es el
+  // número de documento (así se crean las cuentas), no se consulta a Firebase Auth
+  // porque las contraseñas no se pueden leer de vuelta una vez creadas.
+  function hExportCredenciales(){
+    const conCuenta=filtered.filter(s=>s.AUTH_EMAIL);
+    if(!conCuenta.length){showSt("Ningún estudiante del filtro actual tiene cuenta creada todavía.",true);return;}
+    const rows=conCuenta.map(s=>({
+      DOCUMENTO:s.NRO_DOCUMENTO||"",
+      NOMBRE_COMPLETO:[s.NOMBRE1,s.NOMBRE2,s.APELLIDO1,s.APELLIDO2].filter(Boolean).join(" "),
+      GRADO:(GRADO_OPTS.find(g=>g.value===s.GRADO)?.label||s.GRADO||"").split(" - ")[1]||s.GRADO||"",
+      GRUPO:s.GRUPO||"",
+      USUARIO:s.AUTH_EMAIL,
+      CONTRASEÑA:s.NRO_DOCUMENTO||""
+    }));
+    const ws=XLSX.utils.json_to_sheet(rows);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Credenciales");
+    XLSX.writeFile(wb,`credenciales_estudiantes_${new Date().toISOString().slice(0,10)}.xlsx`);
+    showSt(`${rows.length} credencial(es) exportada(s). Este archivo tiene contraseñas en texto plano: bórralo después de imprimirlo/repartirlo.`);
+  }
   function dlS(name,headers,rows){const ws=XLSX.utils.json_to_sheet(rows,{header:headers});Object.keys(ws).forEach(c=>{if(c[0]==="!")return;const x=ws[c];if(x.t==="n"){x.t="s";x.v=String(x.v);delete x.w;}});const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Datos");XLSX.writeFile(wb,`${name}_${new Date().toISOString().slice(0,10)}.xlsx`);showSt("SIMPADE exportado.");}
   function mR(list,h2){return list.map(s=>{const r={};h2.forEach(k=>{r[k]=s[k]||"";});return r;});}
   function xS1(){const h2=["ANNO_INF","PER_ID","TIPO_DOCUMENTO","NRO_DOCUMENTO","APELLIDO1","APELLIDO2","NOMBRE1","NOMBRE2","EMBARAZO","ABANDONOS_TEMPORALES","REPETIDA_GRADO_ACTUAL","ANTECE_DISC_VIDA_ACA","ASISTENCIA_ANNO_ANTERIOR","ESTRATEGIAS_DEBERIA_TENER"];dlS("1_INFORMACION_NO_MIGRADA_ESTUDIANTE",h2,mR(students,h2));}
@@ -2488,6 +2533,7 @@ function App(){
             isAdmin&&h('button',{onClick:()=>{setShowCompletitud(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"📊 Completitud de Datos"),
             isAdmin&&h('button',{onClick:()=>{hNormalize();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🧹 Normalizar Datos Existentes"),
             isAdmin&&h('button',{onClick:()=>{hCrearUsuariosEstudiantes();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🎓 Crear Usuarios de Estudiantes"),
+            isAdmin&&h('button',{onClick:()=>{hExportCredenciales();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🔑 Exportar Usuarios y Contraseñas"),
             isAdmin&&h('div',{className:"border-t border-slate-100 my-1"}),
             isAdmin&&h('button',{onClick:()=>{setConfirmClearDB(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50 flex items-center gap-2"},h(Icons.Trash),"Borrar Base de Datos")
           )
