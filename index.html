@@ -119,7 +119,7 @@ const usersStorage = {
 // Usa una app secundaria de Firebase para no cerrar la sesión del admin. Salta a quienes
 // ya tengan cuenta (AUTH_UID) o cuyo documento tenga menos de 6 caracteres (mínimo de Firebase).
 async function crearUsuariosEstudiantes(lista){
-  const resultado={creados:0,saltados:0,errores:[]};
+  const resultado={creados:0,saltados:0,errores:[],limitados:0};
   if(!db||!auth) return resultado;
   const pendientes=lista.filter(s=>!s.AUTH_UID && s.NOMBRE1 && s.APELLIDO1 && s.NRO_DOCUMENTO);
   resultado.saltados = lista.length - pendientes.length;
@@ -129,6 +129,8 @@ async function crearUsuariosEstudiantes(lista){
   const usadosSnap = await db.collection(USERS_COLLECTION).get();
   const usados = new Set(usadosSnap.docs.map(d=>(d.data().email||"").toLowerCase()));
 
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
   const secondaryName='secondary-'+Date.now();
   const secondaryApp=firebase.initializeApp(FIREBASE_CONFIG, secondaryName);
   try{
@@ -137,19 +139,32 @@ async function crearUsuariosEstudiantes(lista){
       if(doc.length<6){ resultado.errores.push({estudiante:`${s.NOMBRE1} ${s.APELLIDO1}`,motivo:"Documento con menos de 6 caracteres"}); continue; }
       const email=buildStudentEmail(s);
       if(usados.has(email.toLowerCase())){ resultado.errores.push({estudiante:`${s.NOMBRE1} ${s.APELLIDO1}`,motivo:`Usuario duplicado (${email})`}); continue; }
-      try{
-        const cred=await secondaryApp.auth().createUserWithEmailAndPassword(email, doc);
-        const uid=cred.user.uid;
-        await db.collection(USERS_COLLECTION).doc(uid).set({
-          nombre:`${s.NOMBRE1} ${s.APELLIDO1}`.trim(), email, role:"estudiante", activo:true,
-          estudianteId:s._id, documento:doc, creadoEn:new Date().toISOString()
-        });
-        await studentsStorage.updateFields(s._id,{AUTH_UID:uid, AUTH_EMAIL:email, AUTH_CREADO_EN:new Date().toISOString()});
-        usados.add(email.toLowerCase());
-        resultado.creados++;
-      }catch(e){
-        resultado.errores.push({estudiante:`${s.NOMBRE1} ${s.APELLIDO1}`,motivo:e.message||String(e)});
+
+      let intentos=0, exito=false;
+      while(intentos<2 && !exito){
+        intentos++;
+        try{
+          const cred=await secondaryApp.auth().createUserWithEmailAndPassword(email, doc);
+          const uid=cred.user.uid;
+          await db.collection(USERS_COLLECTION).doc(uid).set({
+            nombre:`${s.NOMBRE1} ${s.APELLIDO1}`.trim(), email, role:"estudiante", activo:true,
+            estudianteId:s._id, documento:doc, creadoEn:new Date().toISOString()
+          });
+          await studentsStorage.updateFields(s._id,{AUTH_UID:uid, AUTH_EMAIL:email, AUTH_CREADO_EN:new Date().toISOString()});
+          usados.add(email.toLowerCase());
+          resultado.creados++;
+          exito=true;
+        }catch(e){
+          const esLimite = e.code==="auth/too-many-requests" || /quota|too many/i.test(e.message||"");
+          if(esLimite && intentos<2){
+            resultado.limitados++;
+            await sleep(8000); // espera y reintenta una vez más
+            continue;
+          }
+          resultado.errores.push({estudiante:`${s.NOMBRE1} ${s.APELLIDO1}`,motivo:e.message||String(e)});
+        }
       }
+      await sleep(250); // evita ráfagas que disparen el límite de creación de cuentas de Firebase
     }
     await secondaryApp.auth().signOut();
   } finally {
@@ -485,7 +500,7 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-portal-estudiante-v10";
+const APP_VERSION = "2026-08-10-portal-estudiante-v11";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar",estudiante:"Estudiante"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900",estudiante:"bg-rose-200 text-rose-900"};
@@ -2280,7 +2295,7 @@ function App(){
   const canDelete=["admin","rector","coordinador","orientacion"].includes(role);
   const canIE=role==="admin";
 
-  function showSt(msg,isError=false){setStatusMsg(msg);setStatusError(isError);if(stRef.current)clearTimeout(stRef.current);stRef.current=setTimeout(()=>setStatusMsg(""),4000);}
+  function showSt(msg,isError=false,duracion){setStatusMsg(msg);setStatusError(isError);if(stRef.current)clearTimeout(stRef.current);stRef.current=setTimeout(()=>setStatusMsg(""),duracion||(msg.length>90?10000:4000));}
   function hChange(fid,val){setFormData(p=>{const n={...p,[fid]:val};if(fid==="RAZON_DESERCION")n.CAUSAS="";if(fid==="ESTADO"&&val!=="RETIRADO"){n.RAZON_DESERCION="";n.CAUSAS="";n.ES_LA_RAZON="";n.FECHA_RETIRO="";n.RAZON_DESERCION_OTRAS="";}return n;});}
   function startNew(){if(!canCreateStudent){showSt("Solo Admin, Coordinador o Auxiliar pueden matricular estudiantes nuevos.",true);return;}setFormData(emptyStudent());setEditingId(null);setActiveSection(0);setView("form");}
   function startEdit(s){if(!canEditFullForm){showSt("No tienes permiso para editar la ficha completa. Usa la pantalla de Comisión.",true);return;}setFormData(s);setEditingId(s._id);setActiveSection(0);setView("form");}
@@ -2400,12 +2415,18 @@ function App(){
     const candidatos=filtered.filter(s=>s.ESTADO!=="RETIRADO");
     const sinCuenta=candidatos.filter(s=>!s.AUTH_UID).length;
     if(!sinCuenta){showSt("Todos los estudiantes de este filtro ya tienen cuenta.");return;}
-    if(!window.confirm(`Se crearán cuentas para ${sinCuenta} estudiante(s) sin cuenta (según el filtro actual: año/grado/grupo/estado). El usuario será inicial+apellido+documento+"e" y la contraseña el número de documento. Puede tardar unos minutos. ¿Continuar?`)) return;
+    if(!window.confirm(`Se crearán cuentas para ${sinCuenta} estudiante(s) sin cuenta (según el filtro actual: año/grado/grupo/estado). El usuario será inicial+apellido+documento+"e" y la contraseña el número de documento. Con muchos estudiantes puede tardar varios minutos (va despacio a propósito para no chocar con el límite de Firebase). ¿Continuar?`)) return;
     setImporting(true);
     try{
       const r=await crearUsuariosEstudiantes(candidatos);
       let msg=`${r.creados} cuenta(s) creada(s), ${r.saltados} ya tenían cuenta o datos incompletos.`;
-      if(r.errores.length){ msg+=` ${r.errores.length} con error (ver consola).`; console.warn("Errores creando usuarios de estudiante:", r.errores); }
+      if(r.errores.length){
+        msg+=` ${r.errores.length} con error.`;
+        const motivos=r.errores.slice(0,3).map(e=>`${e.estudiante}: ${e.motivo}`).join(" | ");
+        msg+=` Ej: ${motivos}`;
+        console.warn("Errores creando usuarios de estudiante:", r.errores);
+      }
+      if(r.limitados>0){ msg+=` Firebase frenó la creación varias veces por límite de velocidad; si quedaron pendientes, espera 2-3 minutos y vuelve a correr esta misma opción (retoma donde se quedó).`; }
       showSt(msg, r.errores.length>0 && r.creados===0);
     }catch(e){ console.error(e); showSt("No se pudo completar la creación de cuentas.",true); }
     setImporting(false);
