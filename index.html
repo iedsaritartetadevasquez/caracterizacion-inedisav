@@ -500,7 +500,7 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-portal-estudiante-v11";
+const APP_VERSION = "2026-08-10-portal-estudiante-v13";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar",estudiante:"Estudiante"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900",estudiante:"bg-rose-200 text-rose-900"};
@@ -974,6 +974,9 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
   const [form,setForm]=useState({nombre:"",email:"",role:"docente",grado:"",grupo:""});
   const [creating,setCreating]=useState(false);
   const [msg,setMsg]=useState(""); const [msgErr,setMsgErr]=useState(false);
+  const [busqueda,setBusqueda]=useState("");
+  const [filtroRol,setFiltroRol]=useState("");
+  const [filtroEstado,setFiltroEstado]=useState("");
   const ic="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400";
 
   useEffect(()=>{
@@ -1035,6 +1038,28 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
       say(`Listo. Ahora borra "${u.email}" en Firebase Console → Authentication, y luego créala de nuevo desde Herramientas → Crear Usuarios de Estudiantes.`);
     }catch(e){ console.error(e); say("No se pudo desvincular la cuenta.",true); }
   }
+  const q=busqueda.trim().toLowerCase();
+  const listaFiltrada=users.filter(u=>
+    (!q || (u.nombre||"").toLowerCase().includes(q) || (u.email||"").toLowerCase().includes(q))
+    && (!filtroRol || u.role===filtroRol)
+    && (!filtroEstado || (filtroEstado==="activo"?u.activo:!u.activo))
+  );
+  function hExportUsuarios(){
+    if(!listaFiltrada.length){say("No hay usuarios que coincidan con la búsqueda/filtro actual.",true);return;}
+    const rows=listaFiltrada.map(u=>({
+      NOMBRE:u.nombre||"",
+      CORREO_USUARIO:u.email||"",
+      ROL:ROLE_LABELS[u.role]||u.role||"",
+      ESTADO:u.activo?"Activo":"Inactivo",
+      CONTRASEÑA: u.role==="estudiante" ? (u.documento||"") : "Gestionada por correo (botón 'Reenviar clave')"
+    }));
+    const ws=XLSX.utils.json_to_sheet(rows);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,"Usuarios");
+    XLSX.writeFile(wb,`usuarios_${new Date().toISOString().slice(0,10)}.xlsx`);
+    registrarAuditoria(usuario,rolActual,"EXPORTAR_USUARIOS",`${rows.length} usuario(s)`);
+    say(`${rows.length} usuario(s) exportado(s). Contiene contraseñas de estudiantes en texto plano: bórralo tras imprimirlo/repartirlo.`);
+  }
 
   return h('div',{className:"fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4 py-6 overflow-y-auto"},
     h('div',{className:"bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 my-auto max-h-[90vh] flex flex-col"},
@@ -1061,15 +1086,32 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
 
       msg&&h('div',{className:`text-sm px-3 py-2 rounded-lg mb-4 ${msgErr?"bg-rose-50 text-rose-600":"bg-emerald-50 text-emerald-700"}`},msg),
 
+      // BUSCADOR / FILTROS
+      h('div',{className:"grid grid-cols-1 md:grid-cols-4 gap-2 mb-3"},
+        h('input',{placeholder:"Buscar por nombre o correo...",value:busqueda,onChange:e=>setBusqueda(e.target.value),className:ic}),
+        h('select',{value:filtroRol,onChange:e=>setFiltroRol(e.target.value),className:ic},
+          h('option',{value:""},"Todos los roles"),
+          MANAGED_ROLES.map(r=>h('option',{key:r,value:r},ROLE_LABELS[r]))
+        ),
+        h('select',{value:filtroEstado,onChange:e=>setFiltroEstado(e.target.value),className:ic},
+          h('option',{value:""},"Todos los estados"),
+          h('option',{value:"activo"},"Solo activos"),
+          h('option',{value:"inactivo"},"Solo inactivos")
+        ),
+        h('button',{onClick:hExportUsuarios,className:"px-3 py-2 border border-indigo-200 text-indigo-700 rounded-lg text-sm hover:bg-indigo-50 flex items-center justify-center gap-1"},h(Icons.Download),"Exportar")
+      ),
+
       // LISTA DE USUARIOS
       h('div',{className:"overflow-y-auto flex-1 border border-slate-200 rounded-lg"},
         loadingList?h('p',{className:"text-sm text-slate-400 text-center py-8"},"Cargando..."):
         users.length===0?h('p',{className:"text-sm text-slate-400 text-center py-8"},"No hay usuarios registrados aún."):
-        h('table',{className:"w-full text-sm"},
+        (()=>{
+          if(!listaFiltrada.length) return h('p',{className:"text-sm text-slate-400 text-center py-8"},"Ningún usuario coincide con la búsqueda/filtro.");
+          return h('table',{className:"w-full text-sm"},
           h('thead',{className:"bg-slate-50 text-slate-500 text-xs uppercase sticky top-0"},
             h('tr',null,h('th',{className:"text-left px-3 py-2"},"Nombre"),h('th',{className:"text-left px-3 py-2"},"Correo"),h('th',{className:"text-left px-3 py-2"},"Rol"),h('th',{className:"text-left px-3 py-2"},"Grado"),h('th',{className:"text-left px-3 py-2"},"Grupo"),h('th',{className:"text-left px-3 py-2"},"Estado"),h('th',{className:"text-left px-3 py-2"},"Acciones"))
           ),
-          h('tbody',null,users.map(u=>h('tr',{key:u.uid,className:"border-t border-slate-100"},
+          h('tbody',null,listaFiltrada.map(u=>h('tr',{key:u.uid,className:"border-t border-slate-100"},
             h('td',{className:"px-3 py-2"},u.nombre,u.uid===currentUid&&h('span',{className:"text-xs text-slate-400"}," (tú)")),
             h('td',{className:"px-3 py-2 whitespace-nowrap"},u.email),
             h('td',{className:"px-3 py-2"},h('select',{value:u.role,onChange:e=>changeRole(u,e.target.value),className:"border border-slate-200 rounded px-2 py-1 text-xs"},MANAGED_ROLES.map(r=>h('option',{key:r,value:r},ROLE_LABELS[r])))),
@@ -1083,7 +1125,7 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
                 : h('button',{onClick:()=>resend(u),className:"text-xs px-2 py-1 border border-slate-200 rounded hover:bg-slate-50"},"Reenviar clave")
             ))
           )))
-        )
+        )})()
       ),
       h('div',{className:"flex justify-end mt-4"},
         h('button',{onClick:onClose,className:"px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50"},"Cerrar")
@@ -2554,7 +2596,7 @@ function App(){
             isAdmin&&h('button',{onClick:()=>{setShowCompletitud(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"📊 Completitud de Datos"),
             isAdmin&&h('button',{onClick:()=>{hNormalize();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🧹 Normalizar Datos Existentes"),
             isAdmin&&h('button',{onClick:()=>{hCrearUsuariosEstudiantes();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🎓 Crear Usuarios de Estudiantes"),
-            isAdmin&&h('button',{onClick:()=>{hExportCredenciales();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🔑 Exportar Usuarios y Contraseñas"),
+            isAdmin&&h('button',{onClick:()=>{hExportCredenciales();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🔑 Exportar Credenciales (solo estudiantes filtrados)"),
             isAdmin&&h('div',{className:"border-t border-slate-100 my-1"}),
             isAdmin&&h('button',{onClick:()=>{setConfirmClearDB(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm text-rose-600 hover:bg-rose-50 flex items-center gap-2"},h(Icons.Trash),"Borrar Base de Datos")
           )
