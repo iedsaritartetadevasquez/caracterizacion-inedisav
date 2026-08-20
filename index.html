@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Caracterización Estudiantil - INEDISAV</title>
+  <title>Caracterización Estudiantil-INEDISAV</title>
   <link rel="icon" href="https://iedsaridartetadevasquezblog.wordpress.com/wp-content/uploads/2023/08/cropped-ecudo-actualizado-1.png"/>
   <!-- Tailwind desde CDN oficial con Play CDN (válido para producción pequeña) -->
   <script src="https://cdn.tailwindcss.com/3.4.1"></script>
@@ -403,6 +403,15 @@ const asistenciaStorage = {
     if(!db) return [];
     const snap=await db.collection(ASISTENCIA_COLLECTION).where('grado','==',grado).where('grupo','==',grupo||"").get();
     return snap.docs.map(d=>d.data());
+  },
+  // Trae los días registrados de un grado/grupo dentro de un mes puntual (para el reporte mensual)
+  async getResumenMes(grado,grupo,mesISO){
+    if(!db) return [];
+    const desde=`${mesISO}-01`, hasta=`${mesISO}-31`;
+    const snap=await db.collection(ASISTENCIA_COLLECTION)
+      .where('grado','==',grado).where('grupo','==',grupo||"")
+      .where('fecha','>=',desde).where('fecha','<=',hasta).get();
+    return snap.docs.map(d=>d.data()).sort((a,b)=>a.fecha.localeCompare(b.fecha));
   }
 };
 
@@ -500,7 +509,7 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-portal-estudiante-v13";
+const APP_VERSION = "2026-08-10-reportes-asistencia-v14";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar",estudiante:"Estudiante"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900",estudiante:"bg-rose-200 text-rose-900"};
@@ -531,7 +540,7 @@ const ESTADO_PERMISOS={
 function permisoEstado(valor,role){return (ESTADO_PERMISOS[valor]||[]).includes(role);}
 const TIPO_DOC_OPTS=[{value:"1",label:"1 - Cédula de Ciudadanía"},{value:"2",label:"2 - Tarjeta de Identidad"},{value:"3",label:"3 - Cédula de Extranjería"},{value:"5",label:"5 - Registro Civil de Nacimiento"},{value:"-6",label:"-6 - NIP"},{value:"-7",label:"-7 - NUIP"},{value:"8",label:"8 - Número Secretaría de Educación"},{value:"-9",label:"-9 - Certificado Cabildo"},{value:"10",label:"10 - PEP"},{value:"11",label:"11 - VISA"},{value:"12",label:"12 - TMF"},{value:"13",label:"13 - PPT"}];
 const TIPO_DOC_FAM_OPTS=[{value:"1",label:"1 - Cédula de Ciudadanía"},{value:"2",label:"2 - Tarjeta de Identidad"},{value:"3",label:"3 - Cédula de Extranjería"},{value:"5",label:"5 - Registro Civil de Nacimiento"},{value:"6",label:"6 - NIP"},{value:"7",label:"7 - NUIP"},{value:"8",label:"8 - Número Secretaría"},{value:"9",label:"9 - Certificado Cabildo"},{value:"10",label:"10 - PEP"},{value:"11",label:"11 - VISA"},{value:"12",label:"12 - TMF"},{value:"13",label:"13 - PPT"}];
-const GRADO_OPTS=[{value:"-2",label:"-2 - Jardín"},{value:"0",label:"0 - Transición"},{value:"1",label:"1 - Primero"},{value:"2",label:"2 - Segundo"},{value:"3",label:"3 - Tercero"},{value:"4",label:"4 - Cuarto"},{value:"5",label:"5 - Quinto"},{value:"6",label:"6 - Sexto"},{value:"7",label:"7 - Séptimo"},{value:"8",label:"8 - Octavo"},{value:"9",label:"9 - Noveno"},{value:"10",label:"10 - Décimo"},{value:"11",label:"11 - Undécimo"},{value:"23",label:"23 - Ciclo 3"},{value:"24",label:"24 - Ciclo 4"},{value:"25",label:"25 - Ciclo 5"},{value:"26",label:"26 - Ciclo 6"}];
+const GRADO_OPTS=[{value:"-1",label:"-1 - Jardín"},{value:"0",label:"0 - Transición"},{value:"1",label:"1 - Primero"},{value:"2",label:"2 - Segundo"},{value:"3",label:"3 - Tercero"},{value:"4",label:"4 - Cuarto"},{value:"5",label:"5 - Quinto"},{value:"6",label:"6 - Sexto"},{value:"7",label:"7 - Séptimo"},{value:"8",label:"8 - Octavo"},{value:"9",label:"9 - Noveno"},{value:"10",label:"10 - Décimo"},{value:"11",label:"11 - Undécimo"},{value:"23",label:"23 - Ciclo 3"},{value:"24",label:"24 - Ciclo 4"},{value:"25",label:"25 - Ciclo 5"},{value:"26",label:"26 - Ciclo 6"}];
 const GRUPO_OPTS=[{value:"",label:"— Sin grupo (grado único) —"},{value:"A",label:"A"},{value:"B",label:"B"},{value:"C",label:"C"},{value:"D",label:"D"},{value:"E",label:"E"},{value:"F",label:"F"}];
 
 // ── Información personal del staff ──
@@ -730,6 +739,126 @@ function printCard(s){
   }).join("");
   const html=`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Ficha - ${nombre}</title><style>body{font-family:Arial,sans-serif;margin:24px;color:#1e293b;}@media print{button{display:none!important;}}</style></head><body><button onclick="window.print()" style="margin-bottom:14px;padding:7px 18px;background:#4f46e5;color:#fff;border:none;border-radius:7px;font-size:13px;cursor:pointer;">🖨️ Imprimir / Guardar PDF</button>${lhHtml()}<div style="display:flex;align-items:center;gap:14px;border-bottom:2px solid #4f46e5;padding-bottom:10px;margin-bottom:16px;"><div style="width:48px;height:48px;border-radius:50%;background:#e0e7ff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#4f46e5;">${(s.NOMBRE1||"?")[0]}${(s.APELLIDO1||"")[0]}</div><div><div style="font-size:16px;font-weight:700;">${nombre} <span style="font-size:10px;padding:2px 7px;border-radius:999px;background:${s.ESTADO==="RETIRADO"?"#ffe4e6":"#d1fae5"};color:${s.ESTADO==="RETIRADO"?"#be123c":"#047857"};">${s.ESTADO==="RETIRADO"?"Retirado":"Matriculado"}</span></div><div style="font-size:11px;color:#64748b;">${tipoDoc}: ${s.NRO_DOCUMENTO||"—"} · Grado: ${grado} · Año: ${s.ANNO_INF||"—"}</div></div></div>${secHtml}<div style="font-size:9px;color:#cbd5e1;text-align:right;margin-top:12px;">Generado el ${new Date().toLocaleDateString("es-CO")}</div>${lfHtml()}</body></html>`;
   dlHtml(html,`Ficha_${(nombre||"estudiante").replace(/\s+/g,"_")}.html`);
+}
+
+// Reporte DIARIO real (con los datos ya marcados ese día), no la planilla en blanco.
+function printAsistenciaDia(students,grado,grupo,fecha,registros,tutor){
+  const gradoLabel=(GRADO_OPTS.find(g=>g.value===grado)?.label?.split(" - ")[1]||grado||"")+(grupo?" - "+grupo:"");
+  const lista=students.filter(s=>s.GRADO===grado&&(!grupo||(s.GRUPO||"")===grupo)&&s.ESTADO!=="RETIRADO")
+    .sort((a,b)=>((a.APELLIDO1||"")+(a.NOMBRE1||"")).localeCompare((b.APELLIDO1||"")+(b.NOMBRE1||"")));
+  const fechaLegible=new Date(fecha+"T00:00:00").toLocaleDateString("es-CO",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
+  const conteo={P:0,A:0,T:0,E:0};
+  const filas=lista.map((s,i)=>{
+    const nombre=[s.NOMBRE1,s.NOMBRE2,s.APELLIDO1,s.APELLIDO2].filter(Boolean).join(" ");
+    const v=registros[s._id]||"";
+    if(conteo[v]!==undefined) conteo[v]++;
+    const o=ESTADO_ASISTENCIA_OPTS.find(x=>x.value===v);
+    return `<tr><td>${i+1}</td><td class="tn">${nombre}</td><td>${o?o.label:"Sin registrar"}</td></tr>`;
+  }).join("");
+  const html=`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Asistencia diaria - ${gradoLabel} - ${fecha}</title>
+<style>*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:18px;font-size:11px}
+@media print{button{display:none!important}}
+h1{background:#1F4E79;color:#fff;text-align:center;padding:8px;font-size:13px;font-weight:700;margin:0}.sub{background:#BDD7EE;color:#1F4E79;text-align:center;padding:6px;font-size:11px;font-weight:700;margin-bottom:10px;text-transform:capitalize}
+.finfo{display:flex;gap:24px;margin-bottom:10px;font-size:11px}
+.conteo{display:flex;gap:10px;margin-bottom:10px}
+.conteo span{padding:4px 10px;border-radius:999px;font-size:10px;font-weight:600;background:#f1f5f9}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th,td{border:1px solid #555;padding:5px 6px;text-align:center}
+th{background:#1F4E79;color:#fff}
+.tn{text-align:left!important}
+h1,.sub{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+</style></head><body>
+<button onclick="window.print()" style="margin-bottom:14px;padding:7px 18px;background:#4f46e5;color:#fff;border:none;border-radius:7px;cursor:pointer;">🖨️ Imprimir / Guardar PDF</button>
+${lhHtml()}
+<h1>IED SARID ARTETA DE VÁSQUEZ — "INEDISAV CONSTRUYENDO CALIDAD"</h1>
+<div class="sub">Reporte diario de asistencia — ${fechaLegible}</div>
+<div class="finfo"><span>DIRECTOR(A) DE GRUPO: <b>${tutor||"Sin asignar"}</b></span><span>GRADO: <b>${gradoLabel}</b></span></div>
+<div class="conteo">${ESTADO_ASISTENCIA_OPTS.map(o=>`<span>${o.label}: ${conteo[o.value]||0}</span>`).join("")}</div>
+<table><thead><tr><th>N°</th><th class="tn">APELLIDOS Y NOMBRES</th><th>ESTADO</th></tr></thead><tbody>${filas}</tbody></table>
+${lfHtml()}
+</body></html>`;
+  dlHtml(html,`Asistencia_diaria_${gradoLabel.replace(/\s+/g,"_")}_${fecha}.html`);
+}
+
+// Reporte MENSUAL real: una columna por cada día registrado ese mes.
+function printAsistenciaMes(students,grado,grupo,mesISO,dias,tutor){
+  const gradoLabel=(GRADO_OPTS.find(g=>g.value===grado)?.label?.split(" - ")[1]||grado||"")+(grupo?" - "+grupo:"");
+  const lista=students.filter(s=>s.GRADO===grado&&(!grupo||(s.GRUPO||"")===grupo)&&s.ESTADO!=="RETIRADO")
+    .sort((a,b)=>((a.APELLIDO1||"")+(a.NOMBRE1||"")).localeCompare((b.APELLIDO1||"")+(b.NOMBRE1||"")));
+  const mesLegible=new Date(mesISO+"-01T00:00:00").toLocaleDateString("es-CO",{year:"numeric",month:"long"});
+  const diasNums=dias.map(d=>d.fecha.slice(8,10));
+  const filas=lista.map((s,i)=>{
+    const nombre=[s.NOMBRE1,s.NOMBRE2,s.APELLIDO1,s.APELLIDO2].filter(Boolean).join(" ");
+    let p=0,a=0,t=0,e=0;
+    const celdas=dias.map(d=>{
+      const v=d.registros?.[s._id]||"";
+      if(v==="P")p++; else if(v==="A")a++; else if(v==="T")t++; else if(v==="E")e++;
+      return `<td>${v}</td>`;
+    }).join("");
+    const total=p+a+t+e; const pct=total?Math.round((p/total)*100):null;
+    return `<tr><td>${i+1}</td><td class="tn">${nombre}</td>${celdas}<td>${p}</td><td>${a}</td><td>${t}</td><td>${e}</td><td>${pct===null?"—":pct+"%"}</td></tr>`;
+  }).join("");
+  const html=`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Asistencia mensual - ${gradoLabel} - ${mesISO}</title>
+<style>*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:18px;font-size:9px}
+@media print{button{display:none!important}}
+h1{background:#1F4E79;color:#fff;text-align:center;padding:8px;font-size:13px;font-weight:700;margin:0}.sub{background:#BDD7EE;color:#1F4E79;text-align:center;padding:6px;font-size:11px;font-weight:700;margin-bottom:10px;text-transform:capitalize}
+.finfo{display:flex;gap:24px;margin-bottom:8px;font-size:11px}
+table{width:100%;border-collapse:collapse;font-size:8px}
+th,td{border:1px solid #555;padding:3px 2px;text-align:center}
+th{background:#1F4E79;color:#fff}
+.tn{text-align:left!important;min-width:150px}
+.th-tot{background:#375623}
+h1,.sub{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+</style></head><body>
+<button onclick="window.print()" style="margin-bottom:14px;padding:7px 18px;background:#4f46e5;color:#fff;border:none;border-radius:7px;cursor:pointer;">🖨️ Imprimir / Guardar PDF</button>
+${lhHtml()}
+<h1>IED SARID ARTETA DE VÁSQUEZ — "INEDISAV CONSTRUYENDO CALIDAD"</h1>
+<div class="sub">Reporte mensual de asistencia — ${mesLegible}</div>
+<div class="finfo"><span>DIRECTOR(A) DE GRUPO: <b>${tutor||"Sin asignar"}</b></span><span>GRADO: <b>${gradoLabel}</b></span></div>
+<table><thead><tr><th>N°</th><th class="tn">APELLIDOS Y NOMBRES</th>${diasNums.map(d=>`<th>${d}</th>`).join("")}<th class="th-tot">P</th><th class="th-tot">A</th><th class="th-tot">T</th><th class="th-tot">E</th><th class="th-tot">%</th></tr></thead><tbody>${filas}</tbody></table>
+<p style="margin-top:8px;font-size:8px;color:#475569">P=Presente, A=Ausente, T=Tarde, E=Excusa. Columnas numeradas = día del mes con registro.</p>
+${lfHtml()}
+</body></html>`;
+  dlHtml(html,`Asistencia_mensual_${gradoLabel.replace(/\s+/g,"_")}_${mesISO}.html`);
+}
+
+// Descarga Excel del reporte mensual de asistencia (una fila por estudiante, una columna por día + totales)
+function exportAsistenciaMesExcel(students,grado,grupo,mesISO,dias){
+  const lista=students.filter(s=>s.GRADO===grado&&(!grupo||(s.GRUPO||"")===grupo)&&s.ESTADO!=="RETIRADO")
+    .sort((a,b)=>((a.APELLIDO1||"")+(a.NOMBRE1||"")).localeCompare((b.APELLIDO1||"")+(b.NOMBRE1||"")));
+  const rows=lista.map(s=>{
+    const nombre=[s.NOMBRE1,s.NOMBRE2,s.APELLIDO1,s.APELLIDO2].filter(Boolean).join(" ");
+    const row={ESTUDIANTE:nombre, DOCUMENTO:s.NRO_DOCUMENTO||""};
+    let p=0,a=0,t=0,e=0;
+    dias.forEach(d=>{
+      const v=d.registros?.[s._id]||"";
+      row[d.fecha]=v;
+      if(v==="P")p++; else if(v==="A")a++; else if(v==="T")t++; else if(v==="E")e++;
+    });
+    const total=p+a+t+e;
+    row.PRESENTES=p; row.AUSENTES=a; row.TARDES=t; row.EXCUSAS=e;
+    row["% ASISTENCIA"]=total?Math.round((p/total)*100):"";
+    return row;
+  });
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Asistencia");
+  XLSX.writeFile(wb,`asistencia_mensual_${grado}${grupo?"-"+grupo:""}_${mesISO}.xlsx`);
+}
+
+// Descarga Excel del reporte diario de asistencia
+function exportAsistenciaDiaExcel(students,grado,grupo,fecha,registros){
+  const lista=students.filter(s=>s.GRADO===grado&&(!grupo||(s.GRUPO||"")===grupo)&&s.ESTADO!=="RETIRADO")
+    .sort((a,b)=>((a.APELLIDO1||"")+(a.NOMBRE1||"")).localeCompare((b.APELLIDO1||"")+(b.NOMBRE1||"")));
+  const rows=lista.map(s=>({
+    ESTUDIANTE:[s.NOMBRE1,s.NOMBRE2,s.APELLIDO1,s.APELLIDO2].filter(Boolean).join(" "),
+    DOCUMENTO:s.NRO_DOCUMENTO||"",
+    ESTADO:ESTADO_ASISTENCIA_OPTS.find(o=>o.value===(registros[s._id]||""))?.label||"Sin registrar"
+  }));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Asistencia");
+  XLSX.writeFile(wb,`asistencia_diaria_${grado}${grupo?"-"+grupo:""}_${fecha}.xlsx`);
 }
 
 function printAsistencia(students,grado,grupo,tutor){
@@ -1709,12 +1838,14 @@ function ComisionTotalView({students}){
   );
 }
 
-function AsistenciaDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMarcar}){
+function AsistenciaDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMarcar,tutor}){
   const [fecha,setFecha]=useState(()=>new Date().toISOString().slice(0,10));
   const [registros,setRegistros]=useState({});
   const [loading,setLoading]=useState(true);
   const [savingId,setSavingId]=useState(null);
   const [guardadoId,setGuardadoId]=useState("");
+  const [mesReporte,setMesReporte]=useState(()=>new Date().toISOString().slice(0,7));
+  const [cargandoMes,setCargandoMes]=useState(false);
 
   useEffect(()=>{
     if(!grado)return;
@@ -1735,6 +1866,17 @@ function AsistenciaDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMar
     setSavingId(null);
   }
 
+  async function hReporteMensual(accion){
+    setCargandoMes(true);
+    try{
+      const dias=await asistenciaStorage.getResumenMes(grado,grupoEfectivo,mesReporte);
+      if(!dias.length){ alert("No hay asistencia registrada en ese mes para este grado/grupo."); setCargandoMes(false); return; }
+      if(accion==="imprimir") printAsistenciaMes(lista,grado,grupoEfectivo,mesReporte,dias,tutor);
+      else exportAsistenciaMesExcel(lista,grado,grupoEfectivo,mesReporte,dias);
+    }catch(e){ console.error(e); alert("No se pudo generar el reporte mensual: "+e.message+(e.message&&e.message.includes("index")?"\n\nSi el error menciona un índice, haz clic en el enlace que da Firebase en la consola del navegador (F12) para crearlo (toma 1-2 minutos).":"")); }
+    setCargandoMes(false);
+  }
+
   const activos=lista.filter(s=>s.ESTADO!=="RETIRADO");
   const conteo={P:0,A:0,T:0,E:0};
   activos.forEach(s=>{ const v=registros[s._id]; if(v&&conteo[v]!==undefined) conteo[v]++; });
@@ -1743,7 +1885,15 @@ function AsistenciaDigitalPanel({lista,grado,grupoEfectivo,role,usuario,puedeMar
     h('div',{className:"flex flex-wrap items-center gap-3"},
       h('label',{className:"text-xs font-medium text-slate-500"},"Fecha:"),
       h('input',{type:"date",value:fecha,onChange:e=>setFecha(e.target.value),className:"border border-slate-200 rounded-lg px-3 py-1.5 text-sm"}),
+      h('button',{onClick:()=>printAsistenciaDia(lista,grado,grupoEfectivo,fecha,registros,tutor),className:"px-3 py-1.5 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-medium hover:bg-indigo-50"},"🖨️ Reporte del día"),
+      h('button',{onClick:()=>exportAsistenciaDiaExcel(lista,grado,grupoEfectivo,fecha,registros),className:"px-3 py-1.5 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-medium hover:bg-emerald-50"},"⬇️ Excel del día"),
       !puedeMarcar&&h('span',{className:"text-xs text-amber-600"},"⚠️ Solo lectura (tu rol no puede marcar asistencia)")
+    ),
+    h('div',{className:"flex flex-wrap items-center gap-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2"},
+      h('label',{className:"text-xs font-medium text-slate-500"},"Reporte mensual:"),
+      h('input',{type:"month",value:mesReporte,onChange:e=>setMesReporte(e.target.value),className:"border border-slate-200 rounded-lg px-3 py-1.5 text-sm"}),
+      h('button',{disabled:cargandoMes,onClick:()=>hReporteMensual("imprimir"),className:"px-3 py-1.5 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-medium hover:bg-indigo-50 disabled:opacity-50"},cargandoMes?"Cargando...":"🖨️ Imprimir mes"),
+      h('button',{disabled:cargandoMes,onClick:()=>hReporteMensual("excel"),className:"px-3 py-1.5 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-medium hover:bg-emerald-50 disabled:opacity-50"},cargandoMes?"Cargando...":"⬇️ Excel del mes")
     ),
     h('div',{className:"flex gap-2 flex-wrap"},
       ESTADO_ASISTENCIA_OPTS.map(o=>h('span',{key:o.value,className:`px-2 py-1 rounded-full text-xs font-medium ${o.color}`},`${o.label}: ${conteo[o.value]||0}`))
@@ -1970,7 +2120,7 @@ function AsistenciaInformesView({students,role,usuario,gradoFijo,grupoFijo,tipo}
         h('button',{onClick:()=>setModoDigital("notas"),className:`px-3 py-1.5 rounded-lg text-xs font-medium ${modoDigital==="notas"?"bg-emerald-600 text-white":"bg-slate-100 text-slate-600 hover:bg-slate-200"}`},"📝 Notas por período")
       ),
       modoDigital==="asistencia"
-        ?h(AsistenciaDigitalPanel,{lista,grado,grupoEfectivo,role,usuario,puedeMarcar})
+        ?h(AsistenciaDigitalPanel,{lista,grado,grupoEfectivo,role,usuario,puedeMarcar,tutor})
         :h(NotasDigitalPanel,{lista,grado,grupoEfectivo,role,usuario,puedeMarcar})
     ),
     grado&&tipo==="asistencia"&&subVista==="reporte"&&h('div',{className:"bg-white rounded-xl border border-slate-200 p-4"},
