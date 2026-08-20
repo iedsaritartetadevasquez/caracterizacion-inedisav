@@ -509,7 +509,7 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-reportes-asistencia-v14";
+const APP_VERSION = "2026-08-10-migracion-grado-v15";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar",estudiante:"Estudiante"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900",estudiante:"bg-rose-200 text-rose-900"};
@@ -540,7 +540,7 @@ const ESTADO_PERMISOS={
 function permisoEstado(valor,role){return (ESTADO_PERMISOS[valor]||[]).includes(role);}
 const TIPO_DOC_OPTS=[{value:"1",label:"1 - Cédula de Ciudadanía"},{value:"2",label:"2 - Tarjeta de Identidad"},{value:"3",label:"3 - Cédula de Extranjería"},{value:"5",label:"5 - Registro Civil de Nacimiento"},{value:"-6",label:"-6 - NIP"},{value:"-7",label:"-7 - NUIP"},{value:"8",label:"8 - Número Secretaría de Educación"},{value:"-9",label:"-9 - Certificado Cabildo"},{value:"10",label:"10 - PEP"},{value:"11",label:"11 - VISA"},{value:"12",label:"12 - TMF"},{value:"13",label:"13 - PPT"}];
 const TIPO_DOC_FAM_OPTS=[{value:"1",label:"1 - Cédula de Ciudadanía"},{value:"2",label:"2 - Tarjeta de Identidad"},{value:"3",label:"3 - Cédula de Extranjería"},{value:"5",label:"5 - Registro Civil de Nacimiento"},{value:"6",label:"6 - NIP"},{value:"7",label:"7 - NUIP"},{value:"8",label:"8 - Número Secretaría"},{value:"9",label:"9 - Certificado Cabildo"},{value:"10",label:"10 - PEP"},{value:"11",label:"11 - VISA"},{value:"12",label:"12 - TMF"},{value:"13",label:"13 - PPT"}];
-const GRADO_OPTS=[{value:"-2",label:"-2 - Jardín"},{value:"0",label:"0 - Transición"},{value:"1",label:"1 - Primero"},{value:"2",label:"2 - Segundo"},{value:"3",label:"3 - Tercero"},{value:"4",label:"4 - Cuarto"},{value:"5",label:"5 - Quinto"},{value:"6",label:"6 - Sexto"},{value:"7",label:"7 - Séptimo"},{value:"8",label:"8 - Octavo"},{value:"9",label:"9 - Noveno"},{value:"10",label:"10 - Décimo"},{value:"11",label:"11 - Undécimo"},{value:"23",label:"23 - Ciclo 3"},{value:"24",label:"24 - Ciclo 4"},{value:"25",label:"25 - Ciclo 5"},{value:"26",label:"26 - Ciclo 6"}];
+const GRADO_OPTS=[{value:"-1",label:"-1 - Jardín"},{value:"0",label:"0 - Transición"},{value:"1",label:"1 - Primero"},{value:"2",label:"2 - Segundo"},{value:"3",label:"3 - Tercero"},{value:"4",label:"4 - Cuarto"},{value:"5",label:"5 - Quinto"},{value:"6",label:"6 - Sexto"},{value:"7",label:"7 - Séptimo"},{value:"8",label:"8 - Octavo"},{value:"9",label:"9 - Noveno"},{value:"10",label:"10 - Décimo"},{value:"11",label:"11 - Undécimo"},{value:"23",label:"23 - Ciclo 3"},{value:"24",label:"24 - Ciclo 4"},{value:"25",label:"25 - Ciclo 5"},{value:"26",label:"26 - Ciclo 6"}];
 const GRUPO_OPTS=[{value:"",label:"— Sin grupo (grado único) —"},{value:"A",label:"A"},{value:"B",label:"B"},{value:"C",label:"C"},{value:"D",label:"D"},{value:"E",label:"E"},{value:"F",label:"F"}];
 
 // ── Información personal del staff ──
@@ -2559,6 +2559,45 @@ function App(){
   // Recorre todos los estudiantes ya guardados y corrige mayúsculas en nombres/documentos
   // y valores de listas desplegables (Ruta, Transportador, etc.) que hayan quedado con
   // distinta capitalización por importaciones anteriores. Solo reescribe los que cambian.
+  // Migración puntual: el código de grado "Jardín" pasó de -2 a -1.
+  // Actualiza estudiantes, la configuración de grados/grupos (tutores) y los docentes
+  // que tengan asignado el grado -2, para que todo quede consistente con el nuevo código.
+  async function hMigrarGradoJardin(){
+    if(!window.confirm('Esto va a cambiar el código de grado "-2" (Jardín) por "-1" en todos los estudiantes, en la configuración de grados/grupos y en los docentes asignados a ese grado. ¿Continuar?')) return;
+    setImporting(true);
+    try{
+      let totalEst=0, totalGrupos=0, totalDocentes=0;
+
+      // 1) Estudiantes
+      const afectados=students.filter(s=>s.GRADO==="-2");
+      if(afectados.length){
+        await studentsStorage.saveMany(afectados.map(s=>({...s,GRADO:"-1"})));
+        totalEst=afectados.length;
+      }
+
+      if(db){
+        // 2) Configuración de grados/grupos (tutores)
+        const gradosSnap=await db.collection(GRADOS_COLLECTION).where("gradoBase","==","-2").get();
+        for(const docSnap of gradosSnap.docs){
+          const d=docSnap.data();
+          const nuevoId="-1"+(d.grupo?"-"+d.grupo:"");
+          await db.collection(GRADOS_COLLECTION).doc(nuevoId).set({tutor:d.tutor||"",gradoBase:"-1",grupo:d.grupo||""});
+          await db.collection(GRADOS_COLLECTION).doc(docSnap.id).delete();
+          totalGrupos++;
+        }
+        // 3) Docentes/personal con ese grado asignado
+        const usuariosSnap=await db.collection(USERS_COLLECTION).where("grado","==","-2").get();
+        for(const docSnap of usuariosSnap.docs){
+          await db.collection(USERS_COLLECTION).doc(docSnap.id).update({grado:"-1"});
+          totalDocentes++;
+        }
+      }
+
+      showSt(`Migración completa: ${totalEst} estudiante(s), ${totalGrupos} grado/grupo(s), ${totalDocentes} docente(s) actualizados.`);
+    }catch(e){ console.error(e); showSt("No se pudo completar la migración.",true); }
+    setImporting(false);
+  }
+
   async function hNormalize(){
     if(!window.confirm("Esto revisará todos los estudiantes y el personal, y corregirá mayúsculas y valores de listas (rutas, transportador, sexo, etc.) desactualizados. ¿Continuar?")) return;
     setImporting(true);
@@ -2745,6 +2784,7 @@ function App(){
             isAdmin&&h('button',{onClick:()=>{setShowAuditoria(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🕒 Auditoría"),
             isAdmin&&h('button',{onClick:()=>{setShowCompletitud(true);setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"📊 Completitud de Datos"),
             isAdmin&&h('button',{onClick:()=>{hNormalize();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🧹 Normalizar Datos Existentes"),
+            isAdmin&&h('button',{onClick:()=>{hMigrarGradoJardin();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🔄 Migrar Grado Jardín (-2 → -1)"),
             isAdmin&&h('button',{onClick:()=>{hCrearUsuariosEstudiantes();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🎓 Crear Usuarios de Estudiantes"),
             isAdmin&&h('button',{onClick:()=>{hExportCredenciales();setShowToolsMenu(false);},className:"w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"},"🔑 Exportar Credenciales (solo estudiantes filtrados)"),
             isAdmin&&h('div',{className:"border-t border-slate-100 my-1"}),
