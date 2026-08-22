@@ -509,7 +509,7 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-migracion-grado-v15";
+const APP_VERSION = "2026-08-10-multicurso-docente-v16";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar",estudiante:"Estudiante"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900",estudiante:"bg-rose-200 text-rose-900"};
@@ -1106,12 +1106,18 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
   const [busqueda,setBusqueda]=useState("");
   const [filtroRol,setFiltroRol]=useState("");
   const [filtroEstado,setFiltroEstado]=useState("");
+  const [grados,setGrados]=useState([]);
+  const [cursosAbiertoUid,setCursosAbiertoUid]=useState("");
   const ic="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400";
 
   useEffect(()=>{
     const unsub=usersStorage.subscribe(list=>{setUsers(list);setLoadingList(false);},()=>setLoadingList(false));
     return ()=>unsub();
   },[]);
+  useEffect(()=>{ const unsub=gradosStorage.subscribe(setGrados,()=>{}); return ()=>unsub(); },[]);
+  // Combinaciones grado+grupo disponibles para marcar como "cursos que dicta" (asistencia/notas)
+  const cursosDisponibles=[...new Map(grados.map(g=>[`${g.gradoBase}|${g.grupo||""}`,{grado:g.gradoBase,grupo:g.grupo||""}])).values()]
+    .sort((a,b)=>(a.grado+a.grupo).localeCompare(b.grado+b.grupo));
 
   function say(t,isErr=false){setMsg(t);setMsgErr(isErr);setTimeout(()=>setMsg(""),4000);}
 
@@ -1146,6 +1152,13 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
   async function changeGrupo(u,grupo){
     try{ await usersStorage.updateUser(u.uid,{grupo}); registrarAuditoria(usuario,rolActual,"ASIGNAR_GRUPO_DOCENTE",`${u.nombre}: ${grupo||"ninguno"}`); say(`Grupo asignado: ${grupo||"ninguno"}.`); }
     catch(e){ console.error(e); say("No se pudo asignar el grupo: "+e.message,true); }
+  }
+  async function toggleCurso(u,curso){
+    const actual=u.gradosAsistencia||[];
+    const clave=`${curso.grado}|${curso.grupo}`;
+    const nuevo=actual.includes(clave)?actual.filter(c=>c!==clave):[...actual,clave];
+    try{ await usersStorage.updateUser(u.uid,{gradosAsistencia:nuevo}); }
+    catch(e){ console.error(e); say("No se pudo actualizar los cursos: "+e.message,true); }
   }
   async function resend(u){
     try{ await usersStorage.resendReset(u.email); registrarAuditoria(usuario,rolActual,"REENVIAR_CLAVE",u.email); say(`Correo de recuperación reenviado a ${u.email}.`); }
@@ -1238,14 +1251,18 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
           if(!listaFiltrada.length) return h('p',{className:"text-sm text-slate-400 text-center py-8"},"Ningún usuario coincide con la búsqueda/filtro.");
           return h('table',{className:"w-full text-sm"},
           h('thead',{className:"bg-slate-50 text-slate-500 text-xs uppercase sticky top-0"},
-            h('tr',null,h('th',{className:"text-left px-3 py-2"},"Nombre"),h('th',{className:"text-left px-3 py-2"},"Correo"),h('th',{className:"text-left px-3 py-2"},"Rol"),h('th',{className:"text-left px-3 py-2"},"Grado"),h('th',{className:"text-left px-3 py-2"},"Grupo"),h('th',{className:"text-left px-3 py-2"},"Estado"),h('th',{className:"text-left px-3 py-2"},"Acciones"))
+            h('tr',null,h('th',{className:"text-left px-3 py-2"},"Nombre"),h('th',{className:"text-left px-3 py-2"},"Correo"),h('th',{className:"text-left px-3 py-2"},"Rol"),h('th',{className:"text-left px-3 py-2"},"Grado (tutor)"),h('th',{className:"text-left px-3 py-2"},"Grupo (tutor)"),h('th',{className:"text-left px-3 py-2"},"Cursos (asistencia)"),h('th',{className:"text-left px-3 py-2"},"Estado"),h('th',{className:"text-left px-3 py-2"},"Acciones"))
           ),
-          h('tbody',null,listaFiltrada.map(u=>h('tr',{key:u.uid,className:"border-t border-slate-100"},
+          h('tbody',null,listaFiltrada.map(u=>h(React.Fragment,{key:u.uid},
+            h('tr',{className:"border-t border-slate-100"},
             h('td',{className:"px-3 py-2"},u.nombre,u.uid===currentUid&&h('span',{className:"text-xs text-slate-400"}," (tú)")),
             h('td',{className:"px-3 py-2 whitespace-nowrap"},u.email),
             h('td',{className:"px-3 py-2"},h('select',{value:u.role,onChange:e=>changeRole(u,e.target.value),className:"border border-slate-200 rounded px-2 py-1 text-xs"},MANAGED_ROLES.map(r=>h('option',{key:r,value:r},ROLE_LABELS[r])))),
             h('td',{className:"px-3 py-2"},u.role==="docente"?h('select',{value:u.grado||"",onChange:e=>changeGrado(u,e.target.value),className:"border border-slate-200 rounded px-2 py-1 text-xs"},h('option',{value:""},"— Sin asignar —"),GRADO_OPTS.map(g=>h('option',{key:g.value,value:g.value},g.label))):h('span',{className:"text-slate-300"},"—")),
             h('td',{className:"px-3 py-2"},u.role==="docente"?h('select',{value:u.grupo||"",onChange:e=>changeGrupo(u,e.target.value),className:"border border-slate-200 rounded px-2 py-1 text-xs"},GRUPO_OPTS.map(g=>h('option',{key:g.value,value:g.value},g.label||"Grupo"))):h('span',{className:"text-slate-300"},"—")),
+            h('td',{className:"px-3 py-2"},u.role==="docente"
+              ?h('button',{onClick:()=>setCursosAbiertoUid(cursosAbiertoUid===u.uid?"":u.uid),className:"text-xs px-2 py-1 border border-indigo-200 text-indigo-700 rounded hover:bg-indigo-50"},`${(u.gradosAsistencia||[]).length} curso(s) ✎`)
+              :h('span',{className:"text-slate-300"},"—")),
             h('td',{className:"px-3 py-2"},h('span',{className:`px-2 py-0.5 rounded-full text-xs font-medium ${u.activo?"bg-emerald-100 text-emerald-700":"bg-slate-200 text-slate-500"}`},u.activo?"Activo":"Inactivo")),
             h('td',{className:"px-3 py-2"},h('div',{className:"flex gap-2"},
               h('button',{onClick:()=>toggleActive(u),className:"text-xs px-2 py-1 border border-slate-200 rounded hover:bg-slate-50"},u.activo?"Desactivar":"Activar"),
@@ -1253,6 +1270,21 @@ function UserSettings({onClose, currentUid, usuario, rolActual}){
                 ? h('button',{onClick:()=>resetStudentAccount(u),className:"text-xs px-2 py-1 border border-amber-200 text-amber-700 rounded hover:bg-amber-50"},"Restablecer cuenta")
                 : h('button',{onClick:()=>resend(u),className:"text-xs px-2 py-1 border border-slate-200 rounded hover:bg-slate-50"},"Reenviar clave")
             ))
+            ),
+            cursosAbiertoUid===u.uid&&h('tr',{className:"bg-indigo-50/50 border-t border-indigo-100"},
+              h('td',{colSpan:8,className:"px-4 py-3"},
+                h('p',{className:"text-xs text-slate-600 mb-2"},h('strong',null,"Cursos donde dicta clase"),' (para marcar Asistencia y Notas — independiente de si es tutor/director de grupo). El grado/grupo de tutor de arriba sigue siendo el único que puede ver y editar en Comisión.'),
+                !cursosDisponibles.length?h('p',{className:"text-xs text-amber-600"},"Primero crea los grados/grupos en la pantalla de Grados y Grupos."):
+                h('div',{className:"flex flex-wrap gap-2"},
+                  cursosDisponibles.map(c=>{
+                    const clave=`${c.grado}|${c.grupo}`;
+                    const activo=(u.gradosAsistencia||[]).includes(clave);
+                    const etiqueta=(GRADO_OPTS.find(g=>g.value===c.grado)?.label?.split(" - ")[1]||c.grado)+(c.grupo?" - "+c.grupo:"");
+                    return h('button',{key:clave,onClick:()=>toggleCurso(u,c),className:`px-2.5 py-1 rounded-full text-xs font-medium border ${activo?"bg-indigo-600 text-white border-indigo-600":"bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`},etiqueta);
+                  })
+                )
+              )
+            )
           )))
         )})()
       ),
@@ -2066,10 +2098,20 @@ function ReporteAsistenciaNotas({lista,grado,grupoEfectivo}){
   );
 }
 
-function AsistenciaInformesView({students,role,usuario,gradoFijo,grupoFijo,tipo}){
+function AsistenciaInformesView({students,role,usuario,gradoFijo,grupoFijo,gradosAsistencia,tipo}){
   const soyDocente=role==="docente";
-  const [grado,setGrado]=useState(soyDocente?(gradoFijo||""):"");
-  const [grupo,setGrupo]=useState(soyDocente?(grupoFijo||""):"");
+  // Un docente puede tener varios cursos donde dicta clase (bachillerato sobre todo);
+  // eso solo aplica a Asistencia/Notas. Comisión/Informes siguen ligados solo al grado de tutor.
+  const misCursos=(gradosAsistencia||[]).map(c=>{const [g,gr]=c.split("|");return {grado:g,grupo:gr||""};});
+  const usaSelectorCursos=soyDocente&&tipo==="asistencia"&&misCursos.length>0;
+  const [grado,setGrado]=useState(()=>{
+    if(usaSelectorCursos) return misCursos[0].grado;
+    return soyDocente?(gradoFijo||""):"";
+  });
+  const [grupo,setGrupo]=useState(()=>{
+    if(usaSelectorCursos) return misCursos[0].grupo;
+    return soyDocente?(grupoFijo||""):"";
+  });
   const [grados,setGrados]=useState([]);
   const [subVista,setSubVista]=useState("digital");
   const [modoDigital,setModoDigital]=useState("asistencia");
@@ -2099,14 +2141,21 @@ function AsistenciaInformesView({students,role,usuario,gradoFijo,grupoFijo,tipo}
     h('div',{className:"bg-white rounded-xl border border-slate-200 p-4"},
       h('h2',{className:"text-base font-semibold text-slate-800 mb-1"},titulo),
       h('p',{className:"text-xs text-slate-500 mb-3"},desc),
-      soyDocente
-        ?(gradoFijo
-            ?h('p',{className:"text-sm text-slate-600"},"Grado asignado: ",h('strong',null,gradoLabel))
-            :h('p',{className:"text-sm text-amber-600"},"⚠️ No tienes un grado asignado. Pide al Admin que te asigne uno."))
-        :h('div',{className:"flex flex-wrap gap-3"},
-            h('select',{value:grado,onChange:e=>{setGrado(e.target.value);setGrupo("");},className:"border border-slate-200 rounded-lg px-3 py-2 text-sm"},h('option',{value:""},"— Seleccione un grado —"),gradosDisponibles.map(g=>h('option',{key:g,value:g},etiquetaGrado(g)))),
-            grado&&gruposDisponibles.length>1&&h('select',{value:grupo,onChange:e=>setGrupo(e.target.value),className:"border border-slate-200 rounded-lg px-3 py-2 text-sm"},h('option',{value:""},"Todos los grupos"),gruposDisponibles.map(g=>h('option',{key:g,value:g},g||"(sin grupo)")))
-          ),
+      usaSelectorCursos
+        ?h('div',{className:"flex flex-wrap items-center gap-3"},
+            h('label',{className:"text-xs font-medium text-slate-500"},"Curso:"),
+            h('select',{value:`${grado}|${grupo}`,onChange:e=>{const [g,gr]=e.target.value.split("|");setGrado(g);setGrupo(gr);},className:"border border-slate-200 rounded-lg px-3 py-2 text-sm"},
+              misCursos.map(c=>h('option',{key:`${c.grado}|${c.grupo}`,value:`${c.grado}|${c.grupo}`},etiquetaGrado(c.grado)+(c.grupo?" - "+c.grupo:"")))
+            )
+          )
+        :soyDocente
+          ?(gradoFijo
+              ?h('p',{className:"text-sm text-slate-600"},"Grado asignado: ",h('strong',null,gradoLabel))
+              :h('p',{className:"text-sm text-amber-600"},"⚠️ No tienes un grado asignado. Pide al Admin que te asigne uno."))
+          :h('div',{className:"flex flex-wrap gap-3"},
+              h('select',{value:grado,onChange:e=>{setGrado(e.target.value);setGrupo("");},className:"border border-slate-200 rounded-lg px-3 py-2 text-sm"},h('option',{value:""},"— Seleccione un grado —"),gradosDisponibles.map(g=>h('option',{key:g,value:g},etiquetaGrado(g)))),
+              grado&&gruposDisponibles.length>1&&h('select',{value:grupo,onChange:e=>setGrupo(e.target.value),className:"border border-slate-200 rounded-lg px-3 py-2 text-sm"},h('option',{value:""},"Todos los grupos"),gruposDisponibles.map(g=>h('option',{key:g,value:g},g||"(sin grupo)")))
+            ),
       tipo==="asistencia"&&grado&&h('div',{className:"flex gap-2 mt-3"},
         h('button',{onClick:()=>setSubVista("digital"),className:`px-3 py-1.5 rounded-lg text-xs font-medium ${subVista==="digital"?"bg-indigo-600 text-white":"bg-slate-100 text-slate-600 hover:bg-slate-200"}`},"📱 Digital"),
         h('button',{onClick:()=>setSubVista("reporte"),className:`px-3 py-1.5 rounded-lg text-xs font-medium ${subVista==="reporte"?"bg-indigo-600 text-white":"bg-slate-100 text-slate-600 hover:bg-slate-200"}`},"📊 Reporte"),
@@ -2829,7 +2878,7 @@ function App(){
                 h('button',{onClick:()=>setView("informes"),className:`px-3 py-1.5 rounded-lg text-sm font-medium transition ${view==="informes"?"bg-indigo-600 text-white":"bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"}`},"📄 Informes")
               ),
               view==="asistencia"
-                ?h(AsistenciaInformesView,{students,role,usuario:session.nombre||session.email,gradoFijo:session.grado||"",grupoFijo:session.grupo||"",tipo:"asistencia"})
+                ?h(AsistenciaInformesView,{students,role,usuario:session.nombre||session.email,gradoFijo:session.grado||"",grupoFijo:session.grupo||"",gradosAsistencia:session.gradosAsistencia||[],tipo:"asistencia"})
                 :view==="informes"
                   ?h(AsistenciaInformesView,{students,role,gradoFijo:session.grado||"",grupoFijo:session.grupo||"",tipo:"informes"})
                   :h(ComisionView,{students,role,usuario:session.nombre||session.email,gradoFijo:session.grado||"",grupoFijo:session.grupo||"",onSave:async(s)=>{await studentsStorage.saveOne(s);showSt("Guardado correctamente.");}})
