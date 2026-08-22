@@ -509,7 +509,7 @@ const Icons = {
 // ═══════════════════════════════════════════
 // Marca de versión visible en el encabezado (junto al botón "Salir") y en la consola del
 // navegador, para verificar rápidamente si el archivo desplegado es el más reciente.
-const APP_VERSION = "2026-08-10-multicurso-docente-v16";
+const APP_VERSION = "2026-08-10-fixes-export-v17";
 console.log("INEDISAV Caracterización — versión cargada:", APP_VERSION);
 const ROLE_LABELS = {admin:"Admin",rector:"Rector",coordinador:"Coordinador",orientacion:"Orientación Escolar",docente:"Docente",auxiliar:"Auxiliar",estudiante:"Estudiante"};
 const ROLE_BADGE  = {admin:"bg-indigo-300 text-indigo-900",rector:"bg-purple-300 text-purple-900",coordinador:"bg-amber-300 text-amber-900",orientacion:"bg-teal-300 text-teal-900",docente:"bg-emerald-300 text-emerald-900",auxiliar:"bg-sky-300 text-sky-900",estudiante:"bg-rose-200 text-rose-900"};
@@ -586,7 +586,7 @@ const SECTIONS=[{id:"ident",label:"Variables Básicas"},{id:"personal",label:"Si
 
 const FIELD_DEFS=[
   {id:"ANNO_INF",label:"Año de información",type:"number",section:"ident",min:2000,max:2030},
-  {id:"PER_ID",label:"ID Persona",type:"text",section:"ident"},
+  {id:"PER_ID",label:"ID Persona",type:"text",section:"ident",validate:"digits"},
   {id:"TIPO_DOCUMENTO",label:"Tipo de documento",type:"select",section:"ident",options:TIPO_DOC_OPTS},
   {id:"NRO_DOCUMENTO",label:"Número de documento",type:"text",section:"ident",validate:"alnum"},
   {id:"APELLIDO1",label:"Primer apellido",type:"text",section:"ident",validate:"alpha"},
@@ -2736,7 +2736,7 @@ function App(){
     reader.onerror=()=>{setImporting(false);showSt("Error al leer el archivo.",true);};reader.readAsArrayBuffer(file);e.target.value="";
   }
 
-  function hExport(){if(!students.length){showSt("No hay registros.",true);return;}const h2=FIELD_DEFS.map(f=>f.id);const rows=students.map(s=>{const r={};h2.forEach(k=>{r[k]=s[k]||"";});return r;});const ws=XLSX.utils.json_to_sheet(rows,{header:h2});const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Estudiantes");XLSX.writeFile(wb,`estudiantes_${new Date().toISOString().slice(0,10)}.xlsx`);showSt("Excel exportado.");}
+  function hExport(){if(!filtered.length){showSt("No hay registros que coincidan con los filtros actuales.",true);return;}const h2=FIELD_DEFS.map(f=>f.id);const rows=filtered.map(s=>{const r={};h2.forEach(k=>{r[k]=s[k]||"";});return r;});const ws=XLSX.utils.json_to_sheet(rows,{header:h2});const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Estudiantes");XLSX.writeFile(wb,`estudiantes_${new Date().toISOString().slice(0,10)}.xlsx`);showSt(`${rows.length} estudiante(s) exportado(s) (según los filtros activos).`);}
 
   // Reporte de usuario/contraseña para entregar impreso. La contraseña siempre es el
   // número de documento (así se crean las cuentas), no se consulta a Firebase Auth
